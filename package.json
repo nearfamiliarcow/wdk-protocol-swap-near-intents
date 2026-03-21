@@ -1,0 +1,64 @@
+{
+  "name": "@tetherto/wdk-protocol-swap-1click",
+  "version": "1.0.0-beta.1",
+  "description": "A chain-agnostic WDK swap protocol that wraps the NEAR Intents 1Click API for cross-chain token swaps.",
+  "keywords": [
+    "wdk",
+    "protocol",
+    "swap",
+    "1click",
+    "cross-chain",
+    "near-intents"
+  ],
+  "author": "Tether",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/tetherto/wdk-protocol-swap-1click.git"
+  },
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "prepublishOnly": "npm run build:types",
+    "build:types": "tsc",
+    "lint": "standard",
+    "lint:fix": "standard --fix",
+    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --testPathIgnorePatterns=integration",
+    "test:integration": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --testPathPatterns=integration --testTimeout=30000",
+    "test:all": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --testTimeout=30000",
+    "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage --testPathIgnorePatterns=integration"
+  },
+  "dependencies": {
+    "@tetherto/wdk-wallet": "^1.0.0-beta.1",
+    "@tetherto/wdk-wallet-btc": "file:../wdk-wallet-btc",
+    "@tetherto/wdk-wallet-evm": "file:../wdk-wallet-evm",
+    "bare-node-runtime": "^1.1.4"
+  },
+  "devDependencies": {
+    "cross-env": "10.0.0",
+    "dotenv": "16.4.7",
+    "jest": "30.0.5",
+    "standard": "17.1.2",
+    "typescript": "5.8.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "bare": "./bare.js",
+      "default": "./index.js"
+    },
+    "./package": {
+      "default": "./package.json"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "standard": {
+    "ignore": [
+      "bare.js",
+      "tests/**/*.js"
+    ]
+  }
+}
