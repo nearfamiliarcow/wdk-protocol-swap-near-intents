@@ -364,7 +364,7 @@ The 1Click API supports 29+ chains. Common chain IDs:
 | `ton` | TON |
 | `tron` | Tron |
 | `near` | NEAR |
-| `plasma` | Plasma (optimized for stablecoin transfers) |
+| `plasma` | Plasma |
 
 Use `getSupportedTokens()` for the full list.
 
