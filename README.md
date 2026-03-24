@@ -429,6 +429,141 @@ The 1Click API returns empty `explorerUrl` fields in status responses. If you ne
 
 The 1Click API echoes `depositMode: "SIMPLE"` in quote responses. This is an internal routing parameter set by the API — you do not need to send it. The protocol correctly uses `depositType: "ORIGIN_CHAIN"` which is the only mode relevant for WDK wallet integrations.
 
+## Frontend Integration Guide
+
+If you're building a swap or payment UI on top of this protocol, here are the patterns and gotchas we found during implementation. See the [`demo` branch](https://github.com/nearfamiliarcow/wdk-protocol-swap-near-intents/tree/demo) for a working reference.
+
+### The Swap Lifecycle (What to Show the User)
+
+A swap has distinct phases. Your UI should handle each:
+
+```
+[Quote] → [Confirm] → [Depositing...] → [Processing...] → [Complete/Refunded/Failed]
+```
+
+1. **Quote phase** — Call `quoteSwap()`. Show the user: input amount, expected output, estimated time, estimated gas fee. This is a dry run — no funds move.
+2. **Confirm** — User reviews and confirms. Call `swap()`.
+3. **Depositing** — `swap()` returns immediately with a `hash` (the deposit TX on the source chain). Show "Deposit submitted" with an explorer link. Status will be `PENDING_DEPOSIT`.
+4. **Processing** — The 1Click backend picks up the deposit. Status moves to `PROCESSING`. The `swapDetails` now contains actual amounts (`amountInFormatted`, `amountOutFormatted`) and the origin TX hash.
+5. **Complete** — Status hits `SUCCESS`. The `destinationTxHash` is now available. Show both origin and destination explorer links. Refresh balances.
+
+**The key thing**: `swap()` returns in ~4 seconds (just the deposit TX), but settlement takes 15-60+ seconds. You must poll `getSwapStatus()` to know when it's done.
+
+### Polling Pattern
+
+Poll every 10 seconds. Stop when `terminal === true`.
+
+```javascript
+async function pollSwap(protocol, depositAddress, onUpdate) {
+  const status = await protocol.getSwapStatus(depositAddress)
+  onUpdate(status)
+  if (!status.terminal) {
+    setTimeout(() => pollSwap(protocol, depositAddress, onUpdate), 10000)
+  }
+}
+```
+
+### Handling `swapDetails` Progressively
+
+The `swapDetails` object populates progressively as the swap moves through stages. Don't assume all fields are present — check before rendering:
+
+| Field | Available at | Use for |
+|---|---|---|
+| `refundFee` | `PENDING_DEPOSIT` | Informational only (in yoctoNEAR, not source token) |
+| `originChainTxHashes` | `PROCESSING` | Origin chain explorer link |
+| `amountInFormatted`, `amountOutFormatted` | `PROCESSING` | Replace "expected" with actual amounts |
+| `destinationChainTxHashes` | `SUCCESS` | Destination chain explorer link |
+| `refundedAmountFormatted` | `SUCCESS` (if partial refund) | Show refund amount to user |
+
+**Tip**: Show "Expected: 0.142 SOL" initially (from the quote), then replace with "Received: 0.14217 SOL (~$12.67)" once `amountOutFormatted` arrives during `PROCESSING`.
+
+### Token Amounts Are Raw BigInts
+
+The protocol returns all amounts as `BigInt` in base units (wei, lamports, satoshis). You need to format them yourself:
+
+```javascript
+// ETH: 18 decimals
+const ethFormatted = (Number(result.tokenInAmount) / 1e18).toFixed(6) + ' ETH'
+
+// SOL: 9 decimals
+const solFormatted = (Number(result.tokenOutAmount) / 1e9).toFixed(6) + ' SOL'
+
+// USDT: 6 decimals
+const usdtFormatted = (Number(amount) / 1e6).toFixed(2) + ' USDT'
+```
+
+However, `swapDetails` from status polling includes pre-formatted strings (`amountInFormatted`, `amountOutFormatted`, etc.) — use those for display once available.
+
+### Building a "Max" Button
+
+When the user wants to swap their entire balance, you can't send the full amount — you need to reserve gas + chain minimums:
+
+- **EVM**: Reserve estimated gas fee (from `quoteSwap().fee`)
+- **Solana native**: Reserve ~0.00089 SOL for rent-exempt minimum + ~0.000005 SOL for tx fee
+- **BTC**: Reserve estimated fee from `quoteSwap().fee` (varies with UTXO set)
+
+If you try to send the full balance, the transaction simulation will fail (especially on Solana).
+
+### Cross-Pay: Handling Partial Refunds
+
+When using `OneClickPay` with `EXACT_OUTPUT`, the user deposits slightly more than needed (to cover slippage). If the actual swap required less:
+
+1. The recipient gets exactly the requested USDT amount
+2. The excess is refunded to the sender (minus a small relayer fee)
+3. `refundedAmountFormatted` in the status response shows how much was returned
+
+**Show this to the user.** If they paid 0.117 SOL and 0.002 SOL was refunded, they'll want to know. Don't just show "Complete" — show "Complete — 0.002287 SOL refunded (~$0.20)".
+
+### Block Explorer Links
+
+The 1Click API returns `explorerUrl: ""` (empty string) for all transaction hashes. You'll need your own chain-to-explorer mapping:
+
+```javascript
+const EXPLORERS = {
+  eth: 'https://etherscan.io/tx/',
+  base: 'https://basescan.org/tx/',
+  arb: 'https://arbiscan.io/tx/',
+  sol: 'https://solscan.io/tx/',
+  btc: 'https://mempool.space/tx/',
+  pol: 'https://polygonscan.com/tx/',
+  ton: 'https://tonviewer.com/transaction/',
+  tron: 'https://tronscan.org/#/transaction/',
+  near: 'https://nearblocks.io/txns/',
+  bsc: 'https://bscscan.com/tx/',
+  op: 'https://optimistic.etherscan.io/tx/',
+  avax: 'https://snowtrace.io/tx/'
+}
+```
+
+You know the source chain from your protocol config (`sourceChain`). For the destination chain, you need to track it from the swap options you passed to `swap()`.
+
+### Resetting the UI After Completion
+
+When a swap reaches a terminal state (`SUCCESS`, `REFUNDED`, `FAILED`):
+
+1. Refresh wallet balances immediately
+2. Clear the swap form for a new swap
+3. Keep the status card visible so the user can see the result and TX links
+4. Offer a "New Swap" button to dismiss the status card
+
+Don't keep the "Confirm Swap" button spinning — reset it when the status is terminal.
+
+### BTC Swaps Are Slow
+
+Bitcoin deposits require 1-3 block confirmations (10-60 minutes) before the 1Click system begins processing. Warn users about this before they confirm a BTC swap. The `timeEstimate` from the quote does NOT include block confirmation time — it starts after the deposit is confirmed.
+
+### Error Handling
+
+Common errors to handle gracefully:
+
+| Error | Cause | User-facing message |
+|---|---|---|
+| `Transaction simulation failed` | Insufficient balance (especially near-full SOL sends) | "Insufficient balance. Try a smaller amount." |
+| `OneClickProtocol: quote expired` | Too long between quote and confirm | "Quote expired. Please get a new quote." |
+| `OneClickProtocol: exceeded maximum fee` | Gas spike hit `swapMaxFee` guard | "Network fees too high right now. Try again later." |
+| `OneClickPay: payment amount is too low` | Below 1Click minimum | "Amount too small. Try a larger amount." |
+| `OneClickPay: USDT is not available on chain` | Unsupported destination | "USDT not available on this chain." |
+
 ## Demo
 
 A full demo with a web UI for testing cross-chain swaps and cross-pay flows is available on the [`demo` branch](https://github.com/nearfamiliarcow/wdk-protocol-swap-near-intents/tree/demo). It includes:
