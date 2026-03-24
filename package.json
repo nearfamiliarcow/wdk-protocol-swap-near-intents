@@ -8,7 +8,8 @@
     "swap",
     "1click",
     "cross-chain",
-    "near-intents"
+    "near-intents",
+    "near"
   ],
   "author": "Tether",
   "license": "Apache-2.0",
@@ -29,13 +30,13 @@
     "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage --testPathIgnorePatterns=integration"
   },
   "dependencies": {
-    "@tetherto/wdk-wallet": "file:../wdk-wallet",
-    "@tetherto/wdk-wallet-btc": "file:../wdk-wallet-btc",
-    "@tetherto/wdk-wallet-evm": "file:../wdk-wallet-evm",
-    "@tetherto/wdk-wallet-solana": "file:../wdk-wallet-solana",
+    "@tetherto/wdk-wallet": "^1.0.0-beta.1",
     "bare-node-runtime": "^1.1.4"
   },
   "devDependencies": {
+    "@tetherto/wdk-wallet-btc": "^1.0.0-beta.1",
+    "@tetherto/wdk-wallet-evm": "^1.0.0-beta.1",
+    "@tetherto/wdk-wallet-solana": "^1.0.0-beta.1",
     "cross-env": "10.0.0",
     "dotenv": "16.4.7",
     "jest": "30.0.5",
@@ -59,7 +60,8 @@
   "standard": {
     "ignore": [
       "bare.js",
-      "tests/**/*.js"
+      "tests/**/*.js",
+      "demo/**/*.js"
     ]
   }
 }
