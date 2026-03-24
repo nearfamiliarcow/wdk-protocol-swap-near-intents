@@ -423,7 +423,7 @@ Solana accounts must maintain a minimum balance (~0.00089 SOL) to remain rent-ex
 
 ### Explorer URLs
 
-The 1Click API returns empty `explorerUrl` fields in status responses. If you need block explorer links, you'll need to maintain your own chain-to-URL mapping. The demo includes one for reference (`getExplorerForChain()`).
+The 1Click API returns empty `explorerUrl` fields in status responses. If you need block explorer links, you'll need to maintain your own chain-to-URL mapping. See the [demo](https://github.com/nearfamiliarcow/wdk-protocol-swap-near-intents/tree/demo) for a reference implementation (`getExplorerForChain()`).
 
 ### `depositMode: "SIMPLE"`
 
@@ -431,75 +431,13 @@ The 1Click API echoes `depositMode: "SIMPLE"` in quote responses. This is an int
 
 ## Demo
 
-A full demo server and web UI are included in `demo/` for testing cross-chain swaps and cross-pay flows with real funds.
+A full demo with a web UI for testing cross-chain swaps and cross-pay flows is available on the [`demo` branch](https://github.com/nearfamiliarcow/wdk-protocol-swap-near-intents/tree/demo). It includes:
 
-### Setup
-
-```bash
-# Copy the example env file
-cp .env.example .env
-```
-
-Edit `.env` with your credentials:
-
-```bash
-# BIP-39 seed phrase — DEMO USE ONLY. This seed is used by the demo server
-# to derive wallet accounts for BTC, Base (EVM), and Solana. Do NOT use a
-# seed phrase that holds significant funds.
-WALLET_SEED=your twelve word mnemonic seed phrase here
-
-# 1Click API JWT token for authenticated quotes and swaps.
-# Contact the NEAR Intents team or visit https://docs.near-intents.org/ to obtain one.
-ONECLICK_JWT=your-jwt-token-here
-```
-
-Start the demo:
-
-```bash
-node demo/server.js
-# Open http://localhost:3000
-```
-
-### Demo Wallets
-
-The demo derives 3 wallet accounts from a single seed phrase (BTC, Base EVM, Solana), with the Solana account used for both native SOL and USDT SPL tokens:
-
-| Wallet | Chain | Asset | Description |
-|---|---|---|---|
-| BTC | Bitcoin | Native BTC | SegWit (bc1q) address |
-| ETH (Base) | Base L2 | Native ETH | Low gas fees for testing |
-| SOL | Solana | Native SOL | |
-| USDT (Solana) | Solana | USDT SPL token | Same address as SOL wallet |
-
-Fund any wallet address shown in the UI to start testing. Base ETH and SOL are the cheapest to test with.
-
-### Demo Features
-
-**Cross-Chain Swap tab:**
-- Select source and destination wallets
-- Get a quote showing exchange rate and estimated time
-- Execute swap and watch live status updates (Pending → Processing → Complete)
-- Origin and destination TX hashes with block explorer links
-- "Show Advanced" toggle for raw 1Click API response data
-
-**Cross-Pay (USDT) tab:**
-- Pay anyone in USDT from any asset you hold
-- Uses `EXACT_OUTPUT` — recipient gets the exact dollar amount
-- Automatic partial refund if less source asset was needed than deposited
-- Supports 17+ destination chains
-
-**Tracking & debugging:**
-- **Transaction History** — persists across swap resets; shows status, TX hashes, amounts, refunds, correlation IDs
-- **API Event Log** — captures every request/response with timestamps and syntax-highlighted JSON; click entries to expand
-- **Balance Refresh** — auto-refreshes on swap completion; manual refresh button in header
-- **Partial Refund Display** — shows refunded amount in yellow when EXACT_OUTPUT returns excess funds
-
-### Demo Quirks
-
-- The demo reads `index.html` into memory at startup. If you edit the HTML, restart the server to pick up changes.
-- BTC swaps require 1-3 block confirmations (10-60 min) before the 1Click system begins processing.
-- Sending near-full SOL balance will fail due to Solana's rent-exempt minimum (~0.00089 SOL).
-- The demo uses `https://api.mainnet-beta.solana.com` which has rate limits. For heavy testing, use a dedicated RPC.
+- Multi-wallet support (BTC, Base ETH, SOL, USDT on Solana)
+- Cross-chain swap and cross-pay (USDT) tabs
+- Live status polling with origin/destination TX explorer links
+- Transaction history and API event log for debugging
+- Partial refund display for EXACT_OUTPUT payments
 
 ## Related Links
 
