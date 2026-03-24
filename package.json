@@ -29,9 +29,10 @@
     "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage --testPathIgnorePatterns=integration"
   },
   "dependencies": {
-    "@tetherto/wdk-wallet": "^1.0.0-beta.1",
+    "@tetherto/wdk-wallet": "file:../wdk-wallet",
     "@tetherto/wdk-wallet-btc": "file:../wdk-wallet-btc",
     "@tetherto/wdk-wallet-evm": "file:../wdk-wallet-evm",
+    "@tetherto/wdk-wallet-solana": "file:../wdk-wallet-solana",
     "bare-node-runtime": "^1.1.4"
   },
   "devDependencies": {

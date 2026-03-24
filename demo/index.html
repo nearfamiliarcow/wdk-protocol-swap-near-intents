@@ -25,6 +25,7 @@
   .btn-primary { background: #4ade80; color: #000; }
   .btn-primary:hover { background: #22c55e; }
   .btn-primary:disabled { background: #1a3a1a; color: #555; cursor: not-allowed; }
+  .btn-sm { width: auto; padding: 6px 14px; font-size: 12px; margin-top: 0; border-radius: 8px; }
   .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
   .tab { flex: 1; padding: 12px; text-align: center; background: #1a1a1a; border: 2px solid #222; border-radius: 12px; cursor: pointer; font-size: 15px; font-weight: 600; color: #888; transition: all 0.2s; }
   .tab:hover { border-color: #333; }
@@ -57,6 +58,44 @@
   .fund-hint { background: #1a1a0a; border: 1px solid #3a3a1a; border-radius: 10px; padding: 10px 14px; font-size: 12px; color: #a0a060; margin-top: 12px; }
   .fund-hint code { background: #222; padding: 2px 6px; border-radius: 4px; font-size: 11px; word-break: break-all; }
   .swap-arrow { text-align: center; font-size: 24px; color: #4ade80; padding: 8px 0; }
+
+  /* Event log styles */
+  .log-toggle { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .log-toggle .card-title { margin-bottom: 0; }
+  .log-badge { background: #4ade80; color: #000; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+  .log-entries { max-height: 400px; overflow-y: auto; margin-top: 12px; }
+  .log-entry { border: 1px solid #222; border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
+  .log-entry-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; cursor: pointer; background: #1a1a1a; }
+  .log-entry-header:hover { background: #222; }
+  .log-ts { font-family: monospace; font-size: 11px; color: #666; }
+  .log-tag { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; }
+  .log-tag.req { background: #1a1a2a; color: #818cf8; }
+  .log-tag.res { background: #0a1a0a; color: #4ade80; }
+  .log-tag.err { background: #1a0a0a; color: #ef4444; }
+  .log-tag.status { background: #1a1a0a; color: #f0c040; }
+  .log-path { font-family: monospace; font-size: 12px; color: #aaa; margin-left: 8px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .log-entry-body { padding: 8px 12px; font-family: monospace; font-size: 11px; color: #888; white-space: pre-wrap; word-break: break-all; background: #0e0e0e; max-height: 200px; overflow-y: auto; }
+  .log-entry-body .log-key { color: #818cf8; }
+  .log-entry-body .log-str { color: #4ade80; }
+  .log-entry-body .log-num { color: #f0c040; }
+
+  /* Transaction history styles */
+  .history-entry { border: 1px solid #222; border-radius: 10px; padding: 12px; margin-bottom: 8px; background: #1a1a1a; }
+  .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .history-type { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
+  .history-type.swap { background: #0a1a0a; color: #4ade80; }
+  .history-type.pay { background: #1a1a2a; color: #818cf8; }
+  .history-status { font-size: 11px; padding: 2px 8px; border-radius: 6px; }
+  .history-status.pending { background: #1a1a0a; color: #f0c040; }
+  .history-status.success { background: #0a1a0a; color: #4ade80; }
+  .history-status.failed { background: #1a0a0a; color: #ef4444; }
+  .history-status.refunded { background: #1a1a0a; color: #f0c040; }
+  .history-row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
+  .history-row .hl { color: #888; }
+  .history-row .hv { color: #ddd; font-family: monospace; }
+  .history-row a { color: #818cf8; text-decoration: none; }
+  .history-row a:hover { text-decoration: underline; }
+  .history-empty { text-align: center; padding: 20px; color: #555; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -66,7 +105,10 @@
 
   <!-- Wallets -->
   <div class="card">
-    <div class="card-title">Your Wallets</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="card-title" style="margin-bottom:0;">Your Wallets</div>
+      <button class="btn btn-sm btn-primary" id="refresh-balances-btn" onclick="handleRefreshBalances()" style="font-size:13px;">Refresh</button>
+    </div>
     <div class="loading" id="wallet-loading">Connecting...</div>
     <div id="wallet-selector" class="hidden">
       <div class="wallet-row" id="wallet-buttons"></div>
@@ -209,14 +251,210 @@
     </div>
   </div>
 
+  <!-- ==================== TRANSACTION HISTORY ==================== -->
+  <div class="card" id="history-card">
+    <div class="log-toggle" onclick="toggleHistory()">
+      <div class="card-title">Transaction History</div>
+      <span class="log-badge" id="history-badge">0</span>
+    </div>
+    <div id="history-entries" class="hidden">
+      <div class="history-empty" id="history-empty">No transactions yet</div>
+    </div>
+  </div>
+
+  <!-- ==================== EVENT LOG ==================== -->
+  <div class="card" id="log-card">
+    <div class="log-toggle" onclick="toggleLog()">
+      <div class="card-title">API Event Log</div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span class="log-badge" id="log-badge">0</span>
+        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); clearLog()">Clear</button>
+      </div>
+    </div>
+    <div id="log-entries" class="log-entries hidden"></div>
+  </div>
+
   <div class="powered">Powered by NEAR Intents &middot; Built with Tether WDK</div>
 </div>
 
 <script>
+// ==================== Event Log System ====================
+
+const eventLog = []
+let logVisible = false
+let historyVisible = false
+const txHistory = [] // { id, type, source, dest, amount, status, hash, depositAddress, correlationId, startedAt, updatedAt, explorerUrl, swapDetails }
+
+function logEvent (tag, path, data, isError = false) {
+  const entry = {
+    ts: new Date().toISOString().slice(11, 23),
+    tag,
+    path,
+    data: typeof data === 'object' ? JSON.parse(JSON.stringify(data, bigIntReplacer)) : data,
+    isError
+  }
+  eventLog.push(entry)
+  document.getElementById('log-badge').textContent = eventLog.length
+  if (logVisible) renderLog()
+}
+
+function toggleLog () {
+  logVisible = !logVisible
+  const el = document.getElementById('log-entries')
+  el.classList.toggle('hidden', !logVisible)
+  if (logVisible) renderLog()
+}
+
+function clearLog () {
+  eventLog.length = 0
+  document.getElementById('log-badge').textContent = '0'
+  renderLog()
+}
+
+function renderLog () {
+  const container = document.getElementById('log-entries')
+  if (eventLog.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:16px;color:#555;font-size:13px;">No events yet</div>'
+    return
+  }
+  // Show newest first
+  container.innerHTML = eventLog.slice().reverse().map((e, i) => {
+    const idx = eventLog.length - 1 - i
+    const tagClass = e.isError ? 'err' : e.tag === 'REQ' ? 'req' : e.tag.includes('STATUS') ? 'status' : 'res'
+    const bodyJson = typeof e.data === 'object' ? syntaxHighlight(JSON.stringify(e.data, null, 2)) : escapeHtml(String(e.data))
+    return `<div class="log-entry">
+      <div class="log-entry-header" onclick="toggleLogEntry(${idx})">
+        <span class="log-ts">${e.ts}</span>
+        <span class="log-tag ${tagClass}">${e.tag}</span>
+        <span class="log-path">${e.path}</span>
+      </div>
+      <div class="log-entry-body hidden" id="log-body-${idx}">${bodyJson}</div>
+    </div>`
+  }).join('')
+}
+
+function toggleLogEntry (idx) {
+  document.getElementById('log-body-' + idx).classList.toggle('hidden')
+}
+
+function syntaxHighlight (json) {
+  return escapeHtml(json)
+    .replace(/"([^"]+)":/g, '"<span class="log-key">$1</span>":')
+    .replace(/: "([^"]*)"/g, ': "<span class="log-str">$1</span>"')
+    .replace(/: (\d+\.?\d*)/g, ': <span class="log-num">$1</span>')
+}
+
+function escapeHtml (s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function bigIntReplacer (key, value) {
+  return typeof value === 'bigint' ? value.toString() : value
+}
+
+// ==================== Transaction History ====================
+
+function toggleHistory () {
+  historyVisible = !historyVisible
+  document.getElementById('history-entries').classList.toggle('hidden', !historyVisible)
+}
+
+function addTxToHistory (entry) {
+  txHistory.unshift(entry) // newest first
+  document.getElementById('history-badge').textContent = txHistory.length
+  renderHistory()
+}
+
+function updateTxInHistory (depositAddress, updates) {
+  const tx = txHistory.find(t => t.depositAddress === depositAddress)
+  if (!tx) return
+  Object.assign(tx, updates)
+  renderHistory()
+}
+
+function renderHistory () {
+  const container = document.getElementById('history-entries')
+  const empty = document.getElementById('history-empty')
+  if (txHistory.length === 0) {
+    empty.classList.remove('hidden')
+    return
+  }
+  empty.classList.add('hidden')
+
+  // Keep the empty element, replace everything else
+  const html = txHistory.map(tx => {
+    const statusClass = tx.status === 'SUCCESS' ? 'success' : tx.status === 'REFUNDED' ? 'refunded' : ['FAILED'].includes(tx.status) ? 'failed' : 'pending'
+    const statusLabel = tx.status === 'SUCCESS' ? 'Complete' : tx.status === 'REFUNDED' ? 'Refunded' : tx.status === 'FAILED' ? 'Failed' : tx.status.replace(/_/g, ' ').toLowerCase()
+    const rows = []
+
+    if (tx.hash) {
+      rows.push(`<div class="history-row"><span class="hl">Deposit TX</span><a href="${tx.explorerUrl}${tx.hash}" target="_blank">${tx.hash.slice(0, 12)}...${tx.hash.slice(-8)}</a></div>`)
+    }
+    if (tx.amountSent) rows.push(`<div class="history-row"><span class="hl">Sent</span><span class="hv">${tx.amountSent}</span></div>`)
+    if (tx.amountReceived) rows.push(`<div class="history-row"><span class="hl">Received</span><span class="hv">${tx.amountReceived}</span></div>`)
+    if (tx.depositAddress) rows.push(`<div class="history-row"><span class="hl">Deposit Addr</span><span class="hv">${tx.depositAddress.slice(0, 10)}...${tx.depositAddress.slice(-8)}</span></div>`)
+    if (tx.correlationId) rows.push(`<div class="history-row"><span class="hl">Correlation ID</span><span class="hv">${tx.correlationId}</span></div>`)
+    if (tx.startedAt) rows.push(`<div class="history-row"><span class="hl">Started</span><span class="hv">${tx.startedAt}</span></div>`)
+    if (tx.updatedAt) rows.push(`<div class="history-row"><span class="hl">Updated</span><span class="hv">${tx.updatedAt}</span></div>`)
+
+    // Render swapDetails if present
+    if (tx.swapDetails) {
+      const sd = tx.swapDetails
+      if (sd.destinationTxHash) {
+        const destExplorer = getExplorerForChain(tx.destChain || '')
+        rows.push(`<div class="history-row"><span class="hl">Dest TX</span><a href="${destExplorer}${sd.destinationTxHash}" target="_blank">${sd.destinationTxHash.slice(0, 12)}...${sd.destinationTxHash.slice(-8)}</a></div>`)
+      }
+      if (sd.amountOut) rows.push(`<div class="history-row"><span class="hl">Actual Out</span><span class="hv">${sd.amountOut}</span></div>`)
+      if (sd.fee) rows.push(`<div class="history-row"><span class="hl">Fee</span><span class="hv">${sd.fee}</span></div>`)
+      // Render any other swapDetails fields
+      for (const [k, v] of Object.entries(sd)) {
+        if (['destinationTxHash', 'amountOut', 'fee'].includes(k)) continue
+        if (v != null && v !== '') rows.push(`<div class="history-row"><span class="hl">${k}</span><span class="hv">${typeof v === 'object' ? JSON.stringify(v) : v}</span></div>`)
+      }
+    }
+
+    return `<div class="history-entry">
+      <div class="history-header">
+        <span class="history-type ${tx.type}">${tx.type === 'swap' ? 'Swap' : 'Pay'}: ${tx.description}</span>
+        <span class="history-status ${statusClass}">${statusLabel}</span>
+      </div>
+      ${rows.join('')}
+    </div>`
+  }).join('')
+
+  // Preserve the empty div but prepend history
+  container.innerHTML = html + '<div class="history-empty hidden" id="history-empty">No transactions yet</div>'
+}
+
+function getExplorerForChain (chain) {
+  const explorers = {
+    btc: 'https://mempool.space/tx/',
+    eth: 'https://etherscan.io/tx/',
+    arb: 'https://arbiscan.io/tx/',
+    pol: 'https://polygonscan.com/tx/',
+    bsc: 'https://bscscan.com/tx/',
+    op: 'https://optimistic.etherscan.io/tx/',
+    avax: 'https://snowtrace.io/tx/',
+    sol: 'https://solscan.io/tx/',
+    ton: 'https://tonviewer.com/transaction/',
+    tron: 'https://tronscan.org/#/transaction/',
+    base: 'https://basescan.org/tx/',
+    near: 'https://nearblocks.io/txns/'
+  }
+  return explorers[chain] || explorers.eth
+}
+
+// ==================== API Wrapper ====================
+
 const api = async (path, body = {}) => {
+  logEvent('REQ', path, body)
   const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   const data = await res.json()
-  if (data.error) throw new Error(data.error)
+  if (data.error) {
+    logEvent('ERR', path, { error: data.error }, true)
+    throw new Error(data.error)
+  }
+  logEvent('RES', path, data)
   return data
 }
 
@@ -236,20 +474,47 @@ async function init () {
   }
 }
 
+async function refreshBalances () {
+  try {
+    const { wallets } = await api('/api/wallets')
+    walletsData = wallets
+    renderWallets()
+  } catch (err) {
+    console.error('Balance refresh failed:', err)
+  }
+}
+
+async function handleRefreshBalances () {
+  const btn = document.getElementById('refresh-balances-btn')
+  btn.disabled = true
+  btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;"></span>'
+  await refreshBalances()
+  btn.disabled = false
+  btn.textContent = 'Refresh'
+}
+
 function renderWallets () {
   document.getElementById('wallet-buttons').innerHTML = walletsData.map(w => `
     <div class="wallet-btn active">
-      <div class="wb-symbol">${w.symbol}</div>
+      <div class="wb-symbol">${w.label || w.symbol}</div>
       <div class="wb-balance">${w.balanceFormatted} ${w.symbol}</div>
       <div class="wb-addr">${w.address.slice(0, 8)}...${w.address.slice(-6)}</div>
     </div>
   `).join('')
 
-  const unfunded = walletsData.filter(w => w.balance === '0')
+  // Show fund hint for unique addresses with zero native balance
+  const seen = new Set()
+  const unfunded = walletsData.filter(w => {
+    if (w.balance === '0' && !seen.has(w.address)) {
+      seen.add(w.address)
+      return true
+    }
+    return false
+  })
   if (unfunded.length > 0) {
     document.getElementById('fund-hint').innerHTML =
       'Fund a wallet to test real transactions:<br>' +
-      unfunded.map(w => `<b>${w.symbol}:</b> <code>${w.address}</code>`).join('<br>')
+      unfunded.map(w => `<b>${w.label || w.symbol}:</b> <code>${w.address}</code>`).join('<br>')
     document.getElementById('fund-hint').classList.remove('hidden')
   }
 }
@@ -265,7 +530,7 @@ function switchTab (t) {
 // ==================== SWAP ====================
 
 function populateSwapSelects () {
-  const opts = walletsData.map(w => `<option value="${w.key}">${w.symbol} (${w.chain})</option>`).join('')
+  const opts = walletsData.map(w => `<option value="${w.key}">${w.label || w.symbol} (${w.chain})</option>`).join('')
   document.getElementById('swap-from').innerHTML = opts
   document.getElementById('swap-to').innerHTML = opts
   // Default: BTC -> ETH
@@ -276,6 +541,15 @@ function populateSwapSelects () {
 function updateSwapUI () {
   const from = walletsData.find(w => w.key === document.getElementById('swap-from').value)
   if (from) document.getElementById('swap-from-symbol').textContent = from.symbol
+  // Prevent swapping to same wallet — filter out the selected source from the "To" dropdown
+  const to = document.getElementById('swap-to')
+  const currentTo = to.value
+  to.innerHTML = walletsData
+    .filter(w => w.key !== document.getElementById('swap-from').value)
+    .map(w => `<option value="${w.key}">${w.label || w.symbol} (${w.chain})</option>`)
+    .join('')
+  // Restore previous selection if still available
+  if ([...to.options].some(o => o.value === currentTo)) to.value = currentTo
   resetSwapQuote()
 }
 
@@ -335,34 +609,106 @@ async function executeSwap () {
 
   try {
     const result = await api('/api/swap-execute', { source: from, destWallet: to, amount })
+    const fw = walletsData.find(w => w.key === from)
+    const tw = walletsData.find(w => w.key === to)
+    const explorerUrl = getExplorerForChain(fw.chain)
+
+    // Show status card
     document.getElementById('swap-status-card').classList.remove('hidden')
     setEl('swap-status-icon', '\u23F3')
     setEl('swap-status-text', 'Swap Submitted')
-    setEl('swap-status-sub', 'Waiting for confirmation...')
-    const explorerUrl = from === 'btc' ? 'https://mempool.space/tx/' : 'https://etherscan.io/tx/'
-    document.getElementById('swap-status-hash').innerHTML = 'TX: <a href="' + explorerUrl + result.hash + '" target="_blank" style="color:#818cf8">' + result.hash.slice(0, 16) + '...</a>'
-    const fw = walletsData.find(w => w.key === from)
-    const tw = walletsData.find(w => w.key === to)
+    setEl('swap-status-sub', 'Waiting for deposit to confirm...')
+    document.getElementById('swap-status-hash').innerHTML = 'Origin TX: <a href="' + explorerUrl + result.hash + '" target="_blank" style="color:#818cf8">' + result.hash.slice(0, 16) + '...</a>'
+
+    // Build clean status details
     const details = document.getElementById('swap-status-details')
-    details.innerHTML = '<div class="quote-box"><div class="quote-row"><span class="quote-label">Sent</span><span class="quote-value">' + (Number(result.tokenInAmount) / (10 ** fw.decimals)).toFixed(fw.decimals > 8 ? 6 : 8) + ' ' + fw.symbol + '</span></div><div class="quote-row"><span class="quote-label">Expected</span><span class="quote-value">' + (Number(result.tokenOutAmount) / (10 ** tw.decimals)).toFixed(tw.decimals > 8 ? 6 : 8) + ' ' + tw.symbol + '</span></div><div class="quote-row"><span class="quote-label">Support ID</span><span class="quote-value" style="font-size:11px;font-family:monospace;color:#666">' + result.correlationId + '</span></div></div>'
+    details.innerHTML = '<div class="quote-box">' +
+      '<div class="quote-row"><span class="quote-label">Sent</span><span class="quote-value">' + result.tokenInFormatted + '</span></div>' +
+      '<div class="quote-row"><span class="quote-label">Expected</span><span class="quote-value">' + result.tokenOutFormatted + '</span></div>' +
+      '<div class="quote-row"><span class="quote-label">Support ID</span><span class="quote-value" style="font-size:11px;font-family:monospace;color:#666">' + result.correlationId + '</span></div>' +
+      '<div id="swap-dest-tx-row" class="quote-row hidden"><span class="quote-label">Dest TX</span><span class="quote-value" id="swap-dest-tx-link"></span></div>' +
+      '</div>'
     details.classList.remove('hidden')
-    pollSwapStatus(from, result.depositAddress)
+
+    // Add to transaction history
+    addTxToHistory({
+      type: 'swap',
+      description: (fw.label || fw.symbol) + ' \u2192 ' + (tw.label || tw.symbol),
+      source: fw.symbol,
+      destChain: tw.chain,
+      amountSent: result.tokenInFormatted,
+      amountReceived: result.tokenOutFormatted + ' (expected)',
+      status: 'PENDING_DEPOSIT',
+      hash: result.hash,
+      depositAddress: result.depositAddress,
+      correlationId: result.correlationId,
+      explorerUrl: explorerUrl,
+      startedAt: new Date().toLocaleTimeString(),
+      updatedAt: new Date().toLocaleTimeString(),
+      swapDetails: null
+    })
+
+    pollSwapStatus(from, result.depositAddress, tw)
   } catch (err) {
     showError('swap-error', err.message)
     btn.disabled = false; btn.innerHTML = 'Confirm Swap'
   }
 }
 
-async function pollSwapStatus (source, depositAddress) {
+async function pollSwapStatus (source, depositAddress, destWalletData) {
   let failures = 0
   const poll = async () => {
     try {
       const s = await api('/api/swap-status', { source, depositAddress })
+      logEvent('STATUS', '/api/swap-status', s)
       failures = 0
       const m = statusMsg(s.status)
       setEl('swap-status-icon', m[0]); setEl('swap-status-text', m[1]); setEl('swap-status-sub', m[2])
+
+      // Update live details from swapDetails
+      if (s.swapDetails) {
+        // Show actual received amount once available
+        if (s.swapDetails.amountOutFormatted) {
+          const expectedEl = document.querySelector('#swap-status-details .quote-row:nth-child(2) .quote-value')
+          if (expectedEl) expectedEl.textContent = s.swapDetails.amountOutFormatted + ' (~$' + (s.swapDetails.amountOutUsd || '?') + ')'
+        }
+
+        // Show destination TX hash once available
+        if (s.swapDetails.destinationChainTxHashes && s.swapDetails.destinationChainTxHashes.length > 0) {
+          const destTx = s.swapDetails.destinationChainTxHashes[0]
+          const destHash = destTx.hash || destTx
+          const destExplorer = destTx.explorerUrl || getExplorerForChain(destWalletData?.chain || '')
+          const row = document.getElementById('swap-dest-tx-row')
+          const link = document.getElementById('swap-dest-tx-link')
+          if (row && link) {
+            link.innerHTML = '<a href="' + destExplorer + destHash + '" target="_blank" style="color:#818cf8;font-size:12px;font-family:monospace">' + destHash.slice(0, 12) + '...' + destHash.slice(-8) + '</a>'
+            row.classList.remove('hidden')
+          }
+        }
+
+        // Render advanced details behind toggle
+        renderSwapDetailsInCard('swap-status-details', s.swapDetails, destWalletData)
+      }
+
+      // Update history entry
+      updateTxInHistory(depositAddress, {
+        status: s.status,
+        updatedAt: s.updatedAt || new Date().toLocaleTimeString(),
+        swapDetails: s.swapDetails || null,
+        correlationId: s.correlationId
+      })
+
       if (['SUCCESS', 'REFUNDED', 'FAILED'].includes(s.status)) {
         document.getElementById('swap-reset-btn').classList.remove('hidden')
+        // Reset the swap form so user can do another swap
+        document.getElementById('swap-exec-btn').classList.add('hidden')
+        document.getElementById('swap-quote-box').classList.add('hidden')
+        document.getElementById('swap-quote-btn').classList.remove('hidden')
+        document.getElementById('swap-quote-btn').disabled = false
+        document.getElementById('swap-quote-btn').innerHTML = 'Get Quote'
+        document.getElementById('swap-amount').value = ''
+        hideError('swap-error')
+        refreshBalances()
       } else {
         setTimeout(poll, 10000)
       }
@@ -379,18 +725,46 @@ async function pollSwapStatus (source, depositAddress) {
   setTimeout(poll, 5000)
 }
 
+function renderSwapDetailsInCard (containerId, swapDetails, destWalletData) {
+  const container = document.getElementById(containerId)
+  if (!container || !swapDetails) return
+
+  // Build all raw detail rows
+  let extraHtml = ''
+  for (const [k, v] of Object.entries(swapDetails)) {
+    if (v == null || v === '') continue
+    const display = typeof v === 'object' ? JSON.stringify(v) : v
+    extraHtml += '<div class="quote-row"><span class="quote-label">' + k + '</span><span class="quote-value" style="font-size:11px;font-family:monospace;max-width:220px;overflow:hidden;text-overflow:ellipsis;word-break:break-all">' + escapeHtml(String(display)) + '</span></div>'
+  }
+
+  if (extraHtml) {
+    let wrapper = container.querySelector('.swap-advanced-wrapper')
+    if (!wrapper) {
+      wrapper = document.createElement('div')
+      wrapper.className = 'swap-advanced-wrapper'
+      wrapper.style.marginTop = '8px'
+      wrapper.innerHTML = '<div style="text-align:center"><span class="advanced-toggle" style="font-size:12px;color:#666;cursor:pointer;text-decoration:underline" onclick="this.parentElement.nextElementSibling.classList.toggle(\'hidden\');this.textContent=this.textContent===\'Show Advanced\'?\'Hide Advanced\':\'Show Advanced\'">Show Advanced</span></div><div class="quote-box hidden" style="margin-top:8px;border-color:#1a2a3a;background:#0a0e1a;max-height:300px;overflow-y:auto"></div>'
+      container.appendChild(wrapper)
+    }
+    wrapper.querySelector('.quote-box').innerHTML = '<div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Raw 1Click API Response</div>' + extraHtml
+  }
+}
+
 function resetSwapFull () {
   resetSwapQuote()
   document.getElementById('swap-amount').value = ''
   document.getElementById('swap-status-details').classList.add('hidden')
   document.getElementById('swap-reset-btn').classList.add('hidden')
+  // Remove the extra swap details section
+  const extra = document.querySelector('#swap-status-details .swap-details-extra')
+  if (extra) extra.remove()
 }
 
 // ==================== PAY ====================
 
 function populatePaySource () {
   document.getElementById('pay-source').innerHTML = walletsData.map(w =>
-    `<option value="${w.key}">${w.symbol} (${w.chain})</option>`
+    `<option value="${w.key}">${w.label || w.symbol} (${w.chain})</option>`
   ).join('')
   onPaySourceChange()
 }
@@ -460,32 +834,96 @@ async function executePay () {
 
   try {
     const result = await api('/api/pay', { source, amount, recipientAddress, recipientChain })
+    const w = walletsData.find(w => w.key === source)
+    const explorerUrl = getExplorerForChain(w.chain)
+
     document.getElementById('pay-status-card').classList.remove('hidden')
     setEl('pay-status-icon', '\u23F3'); setEl('pay-status-text', 'Payment Submitted')
     setEl('pay-status-sub', 'Waiting for confirmation...')
-    const explorerUrl = source === 'btc' ? 'https://mempool.space/tx/' : 'https://etherscan.io/tx/'
-    document.getElementById('pay-status-hash').innerHTML = 'TX: <a href="' + explorerUrl + result.hash + '" target="_blank" style="color:#818cf8">' + result.hash.slice(0, 16) + '...</a>'
+    document.getElementById('pay-status-hash').innerHTML = 'Origin TX: <a href="' + explorerUrl + result.hash + '" target="_blank" style="color:#818cf8">' + result.hash.slice(0, 16) + '...</a>'
     const details = document.getElementById('pay-status-details')
-    const w = walletsData.find(w => w.key === source)
-    details.innerHTML = '<div class="quote-box"><div class="quote-row"><span class="quote-label">Paid</span><span class="quote-value">' + (Number(result.amountPaid) / (10 ** w.decimals)).toFixed(w.decimals > 8 ? 6 : 8) + ' ' + w.symbol + '</span></div><div class="quote-row"><span class="quote-label">Recipient gets</span><span class="quote-value highlight">' + result.amountReceived + ' USDT</span></div><div class="quote-row"><span class="quote-label">Destination</span><span class="quote-value"><span class="chain-badge">' + result.recipientChain.toUpperCase() + '</span></span></div><div class="quote-row"><span class="quote-label">Support ID</span><span class="quote-value" style="font-size:11px;font-family:monospace;color:#666">' + result.correlationId + '</span></div></div>'
+    details.innerHTML = '<div class="quote-box">' +
+      '<div class="quote-row"><span class="quote-label">Paid</span><span class="quote-value">' + result.amountPaidFormatted + '</span></div>' +
+      '<div class="quote-row"><span class="quote-label">Recipient gets</span><span class="quote-value highlight">' + result.amountReceived + ' USDT</span></div>' +
+      '<div class="quote-row"><span class="quote-label">Destination</span><span class="quote-value"><span class="chain-badge">' + result.recipientChain.toUpperCase() + '</span></span></div>' +
+      '<div class="quote-row"><span class="quote-label">Support ID</span><span class="quote-value" style="font-size:11px;font-family:monospace;color:#666">' + result.correlationId + '</span></div>' +
+      '<div id="pay-dest-tx-row" class="quote-row hidden"><span class="quote-label">Dest TX</span><span class="quote-value" id="pay-dest-tx-link"></span></div>' +
+      '</div>'
     details.classList.remove('hidden')
-    pollPayStatus(source, result.depositAddress)
+
+    // Add to transaction history
+    addTxToHistory({
+      type: 'pay',
+      description: (w.label || w.symbol) + ' \u2192 ' + amount + ' USDT on ' + recipientChain.toUpperCase(),
+      source: w.symbol,
+      destChain: recipientChain,
+      amountSent: result.amountPaidFormatted,
+      amountReceived: result.amountReceived + ' USDT',
+      status: 'PENDING_DEPOSIT',
+      hash: result.hash,
+      depositAddress: result.depositAddress,
+      correlationId: result.correlationId,
+      explorerUrl: explorerUrl,
+      startedAt: new Date().toLocaleTimeString(),
+      updatedAt: new Date().toLocaleTimeString(),
+      swapDetails: null
+    })
+
+    pollPayStatus(source, result.depositAddress, recipientChain)
   } catch (err) {
     showError('pay-error', err.message)
     btn.disabled = false; btn.innerHTML = 'Confirm & Pay'
   }
 }
 
-async function pollPayStatus (source, depositAddress) {
+async function pollPayStatus (source, depositAddress, destChain) {
   let failures = 0
   const poll = async () => {
     try {
       const s = await api('/api/status', { source, depositAddress })
+      logEvent('STATUS', '/api/status', s)
       failures = 0
       const m = statusMsg(s.status)
       setEl('pay-status-icon', m[0]); setEl('pay-status-text', m[1]); setEl('pay-status-sub', m[2])
+
+      if (s.swapDetails) {
+        // Show destination TX hash once available
+        if (s.swapDetails.destinationChainTxHashes && s.swapDetails.destinationChainTxHashes.length > 0) {
+          const destTx = s.swapDetails.destinationChainTxHashes[0]
+          const destHash = destTx.hash || destTx
+          const destExplorer = destTx.explorerUrl || getExplorerForChain(destChain)
+          const row = document.getElementById('pay-dest-tx-row')
+          const link = document.getElementById('pay-dest-tx-link')
+          if (row && link) {
+            link.innerHTML = '<a href="' + destExplorer + destHash + '" target="_blank" style="color:#818cf8;font-size:12px;font-family:monospace">' + destHash.slice(0, 12) + '...' + destHash.slice(-8) + '</a>'
+            row.classList.remove('hidden')
+          }
+        }
+
+        // Render advanced details behind toggle
+        renderSwapDetailsInCard('pay-status-details', s.swapDetails, { chain: destChain })
+      }
+
+      // Update history entry
+      updateTxInHistory(depositAddress, {
+        status: s.status,
+        updatedAt: s.updatedAt || new Date().toLocaleTimeString(),
+        swapDetails: s.swapDetails || null,
+        correlationId: s.correlationId
+      })
+
       if (['SUCCESS', 'REFUNDED', 'FAILED'].includes(s.status)) {
         document.getElementById('pay-reset-btn').classList.remove('hidden')
+        // Reset the pay form
+        document.getElementById('pay-send-btn').classList.add('hidden')
+        document.getElementById('pay-quote-box').classList.add('hidden')
+        document.getElementById('pay-quote-btn').classList.remove('hidden')
+        document.getElementById('pay-quote-btn').disabled = false
+        document.getElementById('pay-quote-btn').innerHTML = 'Get Quote'
+        document.getElementById('pay-amount').value = ''
+        document.getElementById('pay-recipient').value = ''
+        hideError('pay-error')
+        refreshBalances()
       } else {
         setTimeout(poll, 10000)
       }
@@ -508,6 +946,8 @@ function resetPayFull () {
   document.getElementById('pay-recipient').value = ''
   document.getElementById('pay-status-details').classList.add('hidden')
   document.getElementById('pay-reset-btn').classList.add('hidden')
+  const extra = document.querySelector('#pay-status-details .swap-details-extra')
+  if (extra) extra.remove()
 }
 
 // ==================== Helpers ====================

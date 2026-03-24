@@ -10,6 +10,7 @@ dotenv.config({ path: resolve(__dirname, '../.env') })
 // WDK wallets
 import { WalletAccountBtc } from '@tetherto/wdk-wallet-btc'
 import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
+import { WalletAccountSolana } from '@tetherto/wdk-wallet-solana'
 
 // Our 1Click protocol + pay helper
 import OneClickProtocol from '../src/one-click-protocol.js'
@@ -60,6 +61,10 @@ const JWT = process.env.ONECLICK_JWT
 if (!SEED) throw new Error('WALLET_SEED not set in .env')
 if (!JWT) throw new Error('ONECLICK_JWT not set in .env')
 
+// --- Constants ---
+
+const USDT_SOL_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
+
 // --- Wallet setup ---
 
 log('INIT', 'Initializing wallets...')
@@ -82,18 +87,49 @@ const btcPay = new OneClickPay(btcProtocol, {
   acceptedSymbols: 'all'
 })
 
-// ETH wallet
-const ethAccount = new WalletAccountEvm(SEED, "0'/0/0", {
-  provider: 'https://eth.merkle.io'
+// ETH wallet on Base (native ETH)
+const baseAccount = new WalletAccountEvm(SEED, "0'/0/0", {
+  provider: 'https://mainnet.base.org'
 })
 
-const ethProtocol = new OneClickProtocol(ethAccount, {
-  sourceChain: 'eth',
+const baseProtocol = new OneClickProtocol(baseAccount, {
+  sourceChain: 'base',
   jwt: JWT,
   quoteWaitingTimeMs: 3000
 })
 
-const ethPay = new OneClickPay(ethProtocol, {
+const basePay = new OneClickPay(baseProtocol, {
+  slippageBps: 200,
+  quoteWaitingTimeMs: 3000,
+  acceptedSymbols: 'all'
+})
+
+// Solana wallet (native SOL)
+const solAccount = await WalletAccountSolana.at(SEED, "0'/0/0", {
+  rpcUrl: 'https://api.mainnet-beta.solana.com',
+  commitment: 'confirmed'
+})
+
+const solProtocol = new OneClickProtocol(solAccount, {
+  sourceChain: 'sol',
+  jwt: JWT,
+  quoteWaitingTimeMs: 3000
+})
+
+const solPay = new OneClickPay(solProtocol, {
+  slippageBps: 200,
+  quoteWaitingTimeMs: 3000,
+  acceptedSymbols: 'all'
+})
+
+// USDT on Solana — same account, different tokenIn
+const usdtSolProtocol = new OneClickProtocol(solAccount, {
+  sourceChain: 'sol',
+  jwt: JWT,
+  quoteWaitingTimeMs: 3000
+})
+
+const usdtSolPay = new OneClickPay(usdtSolProtocol, {
   slippageBps: 200,
   quoteWaitingTimeMs: 3000,
   acceptedSymbols: 'all'
@@ -106,20 +142,45 @@ const wallets = {
     pay: btcPay,
     symbol: 'BTC',
     decimals: 8,
-    chain: 'btc'
+    chain: 'btc',
+    tokenIn: 'native'
   },
-  eth: {
-    account: ethAccount,
-    protocol: ethProtocol,
-    pay: ethPay,
+  base_eth: {
+    account: baseAccount,
+    protocol: baseProtocol,
+    pay: basePay,
     symbol: 'ETH',
     decimals: 18,
-    chain: 'eth'
+    chain: 'base',
+    tokenIn: 'native',
+    label: 'ETH (Base)'
+  },
+  sol: {
+    account: solAccount,
+    protocol: solProtocol,
+    pay: solPay,
+    symbol: 'SOL',
+    decimals: 9,
+    chain: 'sol',
+    tokenIn: 'native',
+    label: 'SOL'
+  },
+  usdt_sol: {
+    account: solAccount,
+    protocol: usdtSolProtocol,
+    pay: usdtSolPay,
+    symbol: 'USDT',
+    decimals: 6,
+    chain: 'sol',
+    tokenIn: USDT_SOL_MINT,
+    tokenAddress: USDT_SOL_MINT,
+    label: 'USDT (Solana)'
   }
 }
 
 log('INIT', 'BTC address:', await btcAccount.getAddress())
-log('INIT', 'ETH address:', await ethAccount.getAddress())
+log('INIT', 'Base address:', await baseAccount.getAddress())
+log('INIT', 'SOL address:', await solAccount.getAddress())
 
 // --- API routes ---
 
@@ -137,7 +198,11 @@ async function handleAPI (path, body) {
       const address = await w.account.getAddress()
       let balance = 0n
       try {
-        balance = await w.account.getBalance()
+        if (w.tokenAddress) {
+          balance = await w.account.getTokenBalance(w.tokenAddress)
+        } else {
+          balance = await w.account.getBalance()
+        }
         log('WALLET', `${key} balance: ${balance} (${(Number(balance) / (10 ** w.decimals)).toFixed(8)} ${w.symbol})`)
       } catch (err) {
         log('WALLET', `${key} balance error: ${err.message}`)
@@ -146,9 +211,11 @@ async function handleAPI (path, body) {
         key,
         address,
         balance: balance.toString(),
-        balanceFormatted: (Number(balance) / (10 ** w.decimals)).toFixed(key === 'btc' ? 8 : 6),
+        balanceFormatted: (Number(balance) / (10 ** w.decimals)).toFixed(w.decimals <= 8 ? w.decimals : 6),
         chain: w.chain,
-        symbol: w.symbol
+        symbol: w.symbol,
+        label: w.label || w.symbol,
+        tokenIn: w.tokenIn || 'native'
       })
     }
     return { wallets: results }
@@ -165,7 +232,7 @@ async function handleAPI (path, body) {
   if (path === '/api/quote') {
     const w = getWallet(body)
     const params = {
-      tokenIn: body.tokenIn || 'native',
+      tokenIn: w.tokenIn || 'native',
       amount: body.amount,
       recipientAddress: body.recipientAddress,
       recipientChain: body.recipientChain
@@ -180,7 +247,7 @@ async function handleAPI (path, body) {
   if (path === '/api/pay') {
     const w = getWallet(body)
     const params = {
-      tokenIn: body.tokenIn || 'native',
+      tokenIn: w.tokenIn || 'native',
       amount: body.amount,
       recipientAddress: body.recipientAddress,
       recipientChain: body.recipientChain
@@ -198,6 +265,7 @@ async function handleAPI (path, body) {
       hash: result.hash,
       depositAddress: result.depositAddress,
       amountPaid: result.amountPaid.toString(),
+      amountPaidFormatted: (Number(result.amountPaid) / (10 ** w.decimals)).toFixed(w.decimals > 8 ? 6 : 8) + ' ' + w.symbol,
       amountReceived: result.amountReceived,
       recipientChain: result.recipientChain,
       recipientAddress: result.recipientAddress,
@@ -228,8 +296,8 @@ async function handleAPI (path, body) {
     log('SWAP-QUOTE', `tokenInSats: ${tokenInSats}, destChain: ${destWallet.chain}, destAddr: ${destAddress}`)
 
     const quote = await w.protocol.quoteSwap({
-      tokenIn: 'native',
-      tokenOut: 'native',
+      tokenIn: w.tokenIn || 'native',
+      tokenOut: destWallet.tokenIn || 'native',
       tokenInAmount: tokenInSats,
       destinationChain: destWallet.chain,
       to: destAddress
@@ -258,8 +326,8 @@ async function handleAPI (path, body) {
     log('SWAP-EXEC', `tokenInSats: ${tokenInSats}, destChain: ${destWallet.chain}, destAddr: ${destAddress}`)
 
     const result = await w.protocol.swap({
-      tokenIn: 'native',
-      tokenOut: 'native',
+      tokenIn: w.tokenIn || 'native',
+      tokenOut: destWallet.tokenIn || 'native',
       tokenInAmount: tokenInSats,
       destinationChain: destWallet.chain,
       to: destAddress
@@ -278,6 +346,10 @@ async function handleAPI (path, body) {
       depositAddress: result.depositAddress,
       tokenInAmount: result.tokenInAmount.toString(),
       tokenOutAmount: result.tokenOutAmount.toString(),
+      tokenInFormatted: (Number(result.tokenInAmount) / (10 ** w.decimals)).toFixed(w.decimals > 8 ? 6 : 8) + ' ' + w.symbol,
+      tokenOutFormatted: (Number(result.tokenOutAmount) / (10 ** destWallet.decimals)).toFixed(destWallet.decimals > 8 ? 6 : 8) + ' ' + destWallet.symbol,
+      sourceSymbol: w.symbol,
+      destSymbol: destWallet.symbol,
       correlationId: result.correlationId
     }
   }
