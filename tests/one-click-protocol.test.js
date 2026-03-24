@@ -132,7 +132,7 @@ describe('OneClickProtocol', () => {
       expect(request.deadline).toBeDefined()
     })
 
-    it('returns fee: 0n with bigint amounts', async () => {
+    it('returns real fee estimate with bigint amounts', async () => {
       const account = createMockAccount()
       const protocol = new OneClickProtocol(account, BASE_CONFIG)
 
@@ -142,7 +142,8 @@ describe('OneClickProtocol', () => {
         tokenInAmount: 1000000n
       })
 
-      expect(result.fee).toBe(0n)
+      // The mock's quoteTransfer returns { fee: 5000n }
+      expect(result.fee).toBe(5000n)
       expect(typeof result.tokenInAmount).toBe('bigint')
       expect(typeof result.tokenOutAmount).toBe('bigint')
       expect(result.tokenInAmount).toBe(1000000n)
@@ -453,7 +454,8 @@ describe('OneClickProtocol', () => {
       })
 
       expect(result.hash).toBe('0xtxhash')
-      expect(result.fee).toBe(0n)
+      // The mock's transfer returns { hash: '0xtxhash', fee: 5000n }
+      expect(result.fee).toBe(5000n)
       expect(result.tokenInAmount).toBe(1000000n)
       expect(result.tokenOutAmount).toBe(999000n)
       expect(result.depositAddress).toBe('0xdeposit')
@@ -610,7 +612,8 @@ describe('OneClickProtocol', () => {
         tokenInAmount: 1000000n
       })
 
-      expect(result.fee).toBe(0n)
+      // The mock's quoteTransfer returns { fee: 5000n }
+      expect(result.fee).toBe(5000n)
       expect(result.tokenInAmount).toBe(1000000n)
     })
   })
@@ -678,6 +681,54 @@ describe('OneClickProtocol', () => {
 
       expect(mockClientGetExecutionStatus).toHaveBeenCalledWith('0xdeposit', 'memo-val')
     })
+
+    it('extracts originTxHash and destinationTxHash from swapDetails', async () => {
+      mockClientGetExecutionStatus.mockResolvedValue({
+        status: 'SUCCESS',
+        correlationId: 'corr-789',
+        updatedAt: '2026-01-01T00:00:00Z',
+        swapDetails: {
+          originChainTxHashes: [{ hash: '0xorigin1', explorerUrl: 'https://etherscan.io/tx/0xorigin1' }],
+          destinationChainTxHashes: [{ hash: '0xdest1', explorerUrl: 'https://arbiscan.io/tx/0xdest1' }]
+        }
+      })
+
+      const protocol = new OneClickProtocol(createMockAccount(), BASE_CONFIG)
+      const result = await protocol.getSwapStatus('0xdeposit')
+
+      expect(result.originTxHash).toBe('0xorigin1')
+      expect(result.destinationTxHash).toBe('0xdest1')
+      expect(result.swapDetails).toBeDefined()
+    })
+
+    it('returns null for originTxHash/destinationTxHash when hashes are not yet available', async () => {
+      mockClientGetExecutionStatus.mockResolvedValue({
+        status: 'PROCESSING',
+        correlationId: 'c',
+        updatedAt: '2026-01-01T00:00:00Z',
+        swapDetails: { originChainTxHashes: [], destinationChainTxHashes: [] }
+      })
+
+      const protocol = new OneClickProtocol(createMockAccount(), BASE_CONFIG)
+      const result = await protocol.getSwapStatus('0xdeposit')
+
+      expect(result.originTxHash).toBeNull()
+      expect(result.destinationTxHash).toBeNull()
+    })
+
+    it('returns null for originTxHash/destinationTxHash when swapDetails is absent', async () => {
+      mockClientGetExecutionStatus.mockResolvedValue({
+        status: 'PENDING_DEPOSIT',
+        correlationId: 'c',
+        updatedAt: '2026-01-01T00:00:00Z'
+      })
+
+      const protocol = new OneClickProtocol(createMockAccount(), BASE_CONFIG)
+      const result = await protocol.getSwapStatus('0xdeposit')
+
+      expect(result.originTxHash).toBeNull()
+      expect(result.destinationTxHash).toBeNull()
+    })
   })
 
   describe('getSupportedTokens', () => {
@@ -688,6 +739,44 @@ describe('OneClickProtocol', () => {
       const tokens = await protocol.getSupportedTokens()
 
       expect(tokens).toEqual(MOCK_TOKENS)
+    })
+  })
+
+  describe('resolveToken', () => {
+    it('resolves a token address to its registry entry', async () => {
+      const account = createMockAccount()
+      const protocol = new OneClickProtocol(account, BASE_CONFIG)
+
+      const entry = await protocol.resolveToken('eth', '0xdAC17F958D2ee523a2206206994597C13D831ec7')
+
+      expect(entry.assetId).toBe('nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near')
+      expect(entry.isNative).toBe(false)
+    })
+
+    it('resolves native token', async () => {
+      const account = createMockAccount()
+      const protocol = new OneClickProtocol(account, BASE_CONFIG)
+
+      const entry = await protocol.resolveToken('eth', 'native')
+
+      expect(entry.assetId).toBe('nep141:eth.omft.near')
+      expect(entry.isNative).toBe(true)
+    })
+  })
+
+  describe('sourceChain getter', () => {
+    it('returns the configured sourceChain', () => {
+      const account = createMockAccount()
+      const protocol = new OneClickProtocol(account, BASE_CONFIG)
+
+      expect(protocol.sourceChain).toBe('eth')
+    })
+
+    it('returns the correct sourceChain for different configs', () => {
+      const account = createMockAccount()
+      const protocol = new OneClickProtocol(account, { ...BASE_CONFIG, sourceChain: 'sol' })
+
+      expect(protocol.sourceChain).toBe('sol')
     })
   })
 })

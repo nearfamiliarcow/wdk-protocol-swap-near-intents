@@ -65,7 +65,7 @@ const DEFAULT_DEADLINE_MS = 600000
 /**
  * @typedef {SwapResult & { depositAddress: string, depositMemo: (string|undefined), correlationId: string, quoteSignature: string, quoteResponse: Object }} OneClickSwapResult
  * @property {string} hash - The deposit transaction hash.
- * @property {bigint} fee - Always 0n. The 1Click fee is embedded in the exchange rate.
+ * @property {bigint} fee - Deposit transaction gas cost in source chain native token base units.
  * @property {bigint} tokenInAmount - Input amount from quoteResponse.quote.amountIn.
  * @property {bigint} tokenOutAmount - Expected output from quoteResponse.quote.amountOut.
  * @property {string} depositAddress - Deposit address for status polling.
@@ -81,6 +81,8 @@ const DEFAULT_DEADLINE_MS = 600000
  * @property {boolean} terminal - True if SUCCESS, REFUNDED, or FAILED.
  * @property {string} correlationId - For support requests.
  * @property {string} updatedAt - ISO 8601 timestamp.
+ * @property {string|null} originTxHash - First origin chain transaction hash, or null if not yet available.
+ * @property {string|null} destinationTxHash - First destination chain transaction hash, or null if not yet available.
  * @property {Object} swapDetails - Transaction hashes, amounts, refund info.
  */
 
@@ -128,20 +130,40 @@ export default class OneClickProtocol extends SwapProtocol {
    * Works without JWT but incurs +0.2% fee penalty on quoted rate.
    * The response will NOT include depositAddress, deadline, or timeWhenInactive.
    *
+   * Note: for Solana SPL token swaps the fee estimate may be ~0.002 SOL low because
+   * the placeholder address ATA (associated token account) is assumed to already exist.
+   *
    * @param {SwapOptions} options
-   * @returns {Promise<Omit<SwapResult, 'hash'>>} fee is always 0n.
+   * @param {Object} [overrides={}] - Per-call config overrides forwarded to _buildQuoteRequest.
+   * @returns {Promise<Omit<SwapResult, 'hash'>>}
    */
-  async quoteSwap (options) {
-    const quoteRequest = await this._buildQuoteRequest(options, true)
+  async quoteSwap (options, overrides = {}) {
+    const quoteRequest = await this._buildQuoteRequest(options, true, overrides)
     const quoteResponse = await this._client.getQuote(quoteRequest)
 
     if (!quoteResponse?.quote) {
       throw new Error('OneClickProtocol: malformed quote response — missing quote object')
     }
 
+    const { isNativeIn } = await this._resolveAssets(options)
+    const amountIn = BigInt(quoteResponse.quote.amountIn)
+    const address = await this._account.getAddress()
+
+    const feeEstimate = isNativeIn
+      ? await this._account.quoteSendTransaction({
+        to: address,
+        value: amountIn,
+        ...(this._config.depositTxOptions ?? {})
+      })
+      : await this._account.quoteTransfer({
+        token: options.tokenIn,
+        recipient: address,
+        amount: amountIn
+      })
+
     return {
-      fee: 0n,
-      tokenInAmount: BigInt(quoteResponse.quote.amountIn),
+      fee: feeEstimate.fee,
+      tokenInAmount: amountIn,
       tokenOutAmount: BigInt(quoteResponse.quote.amountOut),
       timeEstimate: quoteResponse.quote.timeEstimate
     }
@@ -153,13 +175,14 @@ export default class OneClickProtocol extends SwapProtocol {
    * Returns when the deposit transaction broadcasts — NOT when the swap settles.
    * Cross-chain settlement can take 15+ minutes. Poll getSwapStatus() for completion.
    *
-   * fee is always 0n — the 1Click protocol fee is embedded in the exchange rate.
-   * The deposit gas cost is paid internally by transfer()/sendTransaction() but not surfaced.
+   * fee is the deposit transaction gas cost in source chain native token base units.
+   * The 1Click protocol fee is embedded in the exchange rate (not in fee).
    *
    * @param {SwapOptions} options
+   * @param {Object} [overrides={}] - Per-call config overrides forwarded to _buildQuoteRequest.
    * @returns {Promise<OneClickSwapResult>}
    */
-  async swap (options) {
+  async swap (options, overrides = {}) {
     // 1. Guard: account must be writable
     if (typeof this._account.sendTransaction !== 'function') {
       throw new Error('OneClickProtocol: swap() requires a non-read-only account.')
@@ -174,7 +197,7 @@ export default class OneClickProtocol extends SwapProtocol {
     const { isNativeIn } = await this._resolveAssets(options)
 
     // 5-8. Build and send live quote request
-    const quoteRequest = await this._buildQuoteRequest(options, false)
+    const quoteRequest = await this._buildQuoteRequest(options, false, overrides)
     const quoteResponse = await this._client.getQuote(quoteRequest)
 
     if (!quoteResponse?.quote) {
@@ -226,7 +249,7 @@ export default class OneClickProtocol extends SwapProtocol {
     }
 
     // 15. Execute deposit
-    const { hash } = await this._deposit(
+    const { hash, fee: depositFee } = await this._deposit(
       quoteResponse.quote.depositAddress,
       options.tokenIn,
       depositAmount,
@@ -254,7 +277,7 @@ export default class OneClickProtocol extends SwapProtocol {
     // 17. Return OneClickSwapResult
     return {
       hash,
-      fee: 0n,
+      fee: depositFee,
       tokenInAmount: BigInt(quoteResponse.quote.amountIn),
       tokenOutAmount: BigInt(quoteResponse.quote.amountOut),
       depositAddress: quoteResponse.quote.depositAddress,
@@ -281,6 +304,8 @@ export default class OneClickProtocol extends SwapProtocol {
       terminal: TERMINAL_STATUSES.includes(response.status),
       correlationId: response.correlationId,
       updatedAt: response.updatedAt,
+      originTxHash: response.swapDetails?.originChainTxHashes?.[0]?.hash ?? null,
+      destinationTxHash: response.swapDetails?.destinationChainTxHashes?.[0]?.hash ?? null,
       swapDetails: response.swapDetails
     }
   }
@@ -292,6 +317,26 @@ export default class OneClickProtocol extends SwapProtocol {
    */
   async getSupportedTokens () {
     return this._client.getTokens()
+  }
+
+  /**
+   * Resolves a WDK token address to its 1Click asset registry entry.
+   *
+   * @param {string} chain - 1Click chain identifier (e.g., "eth", "sol").
+   * @param {string} tokenAddress - WDK token address or 'native'.
+   * @returns {Promise<{ assetId: string, isNative: boolean, decimals: number, symbol: string }>}
+   */
+  async resolveToken (chain, tokenAddress) {
+    return this._registry.resolve(chain, tokenAddress)
+  }
+
+  /**
+   * The 1Click chain identifier for the source chain this protocol instance is configured for.
+   *
+   * @returns {string}
+   */
+  get sourceChain () {
+    return this._config.sourceChain
   }
 
   /**
@@ -326,9 +371,12 @@ export default class OneClickProtocol extends SwapProtocol {
    * @private
    * @param {SwapOptions} options
    * @param {boolean} dry - true for quoteSwap(), false for swap().
+   * @param {Object} [overrides={}] - Per-call config overrides. Supported keys:
+   *   slippageBps (maps to slippageTolerance in the request body),
+   *   deadlineMs, quoteWaitingTimeMs, appFees, referral.
    * @returns {Promise<Object>} Complete request body matching POST /v0/quote schema.
    */
-  async _buildQuoteRequest (options, dry) {
+  async _buildQuoteRequest (options, dry, overrides = {}) {
     const { originAssetId, destinationAssetId } = await this._resolveAssets(options)
     const address = await this._account.getAddress()
 
@@ -345,10 +393,15 @@ export default class OneClickProtocol extends SwapProtocol {
       throw new Error('OneClickProtocol: swap amount must be greater than zero')
     }
 
+    const effectiveDeadlineMs = overrides.deadlineMs ?? this._config.deadlineMs ?? DEFAULT_DEADLINE_MS
+    const effectiveAppFees = overrides.appFees ?? this._config.appFees
+    const effectiveQuoteWaitingTimeMs = overrides.quoteWaitingTimeMs ?? this._config.quoteWaitingTimeMs
+    const effectiveReferral = overrides.referral ?? this._config.referral
+
     const request = {
       dry,
       swapType,
-      slippageTolerance: this._config.slippageBps ?? DEFAULT_SLIPPAGE_BPS,
+      slippageTolerance: overrides.slippageBps ?? this._config.slippageBps ?? DEFAULT_SLIPPAGE_BPS,
       originAsset: originAssetId,
       destinationAsset: destinationAssetId,
       amount,
@@ -357,19 +410,19 @@ export default class OneClickProtocol extends SwapProtocol {
       recipientType: 'DESTINATION_CHAIN',
       refundTo: address,
       refundType: 'ORIGIN_CHAIN',
-      deadline: new Date(Date.now() + (this._config.deadlineMs ?? DEFAULT_DEADLINE_MS)).toISOString()
+      deadline: new Date(Date.now() + effectiveDeadlineMs).toISOString()
     }
 
-    if (this._config.appFees) {
-      request.appFees = this._config.appFees
+    if (effectiveAppFees) {
+      request.appFees = effectiveAppFees
     }
 
-    if (this._config.quoteWaitingTimeMs) {
-      request.quoteWaitingTimeMs = this._config.quoteWaitingTimeMs
+    if (effectiveQuoteWaitingTimeMs) {
+      request.quoteWaitingTimeMs = effectiveQuoteWaitingTimeMs
     }
 
-    if (this._config.referral) {
-      request.referral = this._config.referral
+    if (effectiveReferral) {
+      request.referral = effectiveReferral
     }
 
     return request

@@ -23,17 +23,16 @@ function createMockProtocol () {
       appFees: undefined,
       referral: undefined
     },
-    _registry: {
-      resolve: jest.fn().mockImplementation(async (chain, tokenAddress) => {
-        if (chain === 'btc' && (tokenAddress === 'native' || tokenAddress == null)) {
-          return { assetId: 'nep141:btc.omft.near', isNative: true, decimals: 8, symbol: 'BTC' }
-        }
-        if (chain === 'eth' && (tokenAddress === 'native' || tokenAddress == null)) {
-          return { assetId: 'nep141:eth.omft.near', isNative: true, decimals: 18, symbol: 'ETH' }
-        }
-        throw new Error(`Token not found: ${chain}:${tokenAddress}`)
-      })
-    },
+    sourceChain: 'btc',
+    resolveToken: jest.fn().mockImplementation(async (chain, tokenAddress) => {
+      if (chain === 'btc' && (tokenAddress === 'native' || tokenAddress == null)) {
+        return { assetId: 'nep141:btc.omft.near', isNative: true, decimals: 8, symbol: 'BTC' }
+      }
+      if (chain === 'eth' && (tokenAddress === 'native' || tokenAddress == null)) {
+        return { assetId: 'nep141:eth.omft.near', isNative: true, decimals: 18, symbol: 'ETH' }
+      }
+      throw new Error(`Token not found: ${chain}:${tokenAddress}`)
+    }),
     getSupportedTokens: jest.fn().mockResolvedValue(MOCK_TOKENS),
     quoteSwap: jest.fn().mockResolvedValue({
       fee: 0n,
@@ -81,13 +80,16 @@ describe('OneClickPay', () => {
         recipientChain: 'eth'
       })
 
-      expect(protocol.quoteSwap).toHaveBeenCalledWith({
-        tokenIn: 'native',
-        tokenOut: '0xdac17f958d2ee523a2206206994597c13d831ec7',
-        tokenOutAmount: 50000000n,
-        destinationChain: 'eth',
-        to: '0xAlice'
-      })
+      expect(protocol.quoteSwap).toHaveBeenCalledWith(
+        {
+          tokenIn: 'native',
+          tokenOut: '0xdac17f958d2ee523a2206206994597c13d831ec7',
+          tokenOutAmount: 50000000n,
+          destinationChain: 'eth',
+          to: '0xAlice'
+        },
+        expect.objectContaining({ slippageBps: 200 })
+      )
     })
 
     it('converts human amount to base units correctly (6 decimals)', async () => {
@@ -124,19 +126,10 @@ describe('OneClickPay', () => {
       expect(quote.slippageBps).toBe(200) // OneClickPay default
     })
 
-    it('applies per-call slippage override', async () => {
+    it('applies per-call slippage override via overrides object', async () => {
       const protocol = createMockProtocol()
       const pay = new OneClickPay(protocol)
 
-      await pay.quotePay({
-        tokenIn: 'native',
-        amount: 50,
-        recipientAddress: '0xAlice',
-        recipientChain: 'eth',
-        slippageBps: 50
-      })
-
-      // Slippage should have been set to 50 during the call
       const quote = await pay.quotePay({
         tokenIn: 'native',
         amount: 50,
@@ -146,11 +139,15 @@ describe('OneClickPay', () => {
       })
       expect(quote.slippageBps).toBe(50)
 
-      // Original config should be restored
+      // protocol._config must never be mutated
       expect(protocol._config.slippageBps).toBe(100)
+
+      // The overrides passed to quoteSwap should contain slippageBps: 50
+      const overrides = protocol.quoteSwap.mock.calls[0][1]
+      expect(overrides.slippageBps).toBe(50)
     })
 
-    it('restores protocol config even on error', async () => {
+    it('does not mutate protocol._config even on error', async () => {
       const protocol = createMockProtocol()
       protocol.quoteSwap.mockRejectedValue(new Error('API error'))
       const pay = new OneClickPay(protocol)
@@ -163,8 +160,10 @@ describe('OneClickPay', () => {
         slippageBps: 50
       })).rejects.toThrow('API error')
 
+      // Config must be completely untouched (no mutation, no restore needed)
       expect(protocol._config.slippageBps).toBe(100)
       expect(protocol._config.deadlineMs).toBe(600000)
+      expect(protocol._config.quoteWaitingTimeMs).toBeUndefined()
     })
 
     it('uses tokenOut override when provided (bypasses USDT resolution)', async () => {
@@ -242,7 +241,7 @@ describe('OneClickPay', () => {
       expect(protocol.getSupportedTokens).toHaveBeenCalledTimes(1)
     })
 
-    it('forwards OneClickPay config to protocol (deadline, quoteWaitingTimeMs, appFees, referral)', async () => {
+    it('forwards OneClickPay config to protocol (deadline, quoteWaitingTimeMs, appFees, referral) via overrides', async () => {
       const protocol = createMockProtocol()
       const pay = new OneClickPay(protocol, {
         deadlineMs: 3600000,
@@ -258,10 +257,18 @@ describe('OneClickPay', () => {
         recipientChain: 'eth'
       })
 
-      // During the call, protocol config should have been overridden
-      // After the call, it should be restored
-      expect(protocol._config.deadlineMs).toBe(600000) // restored
-      expect(protocol._config.quoteWaitingTimeMs).toBeUndefined() // restored
+      // Overrides must be forwarded to quoteSwap, not applied to protocol._config
+      const overrides = protocol.quoteSwap.mock.calls[0][1]
+      expect(overrides.deadlineMs).toBe(3600000)
+      expect(overrides.quoteWaitingTimeMs).toBe(5000)
+      expect(overrides.appFees).toEqual([{ recipient: '0xfee', fee: 50 }])
+      expect(overrides.referral).toBe('myapp')
+
+      // protocol._config must be completely untouched
+      expect(protocol._config.deadlineMs).toBe(600000)
+      expect(protocol._config.quoteWaitingTimeMs).toBeUndefined()
+      expect(protocol._config.appFees).toBeUndefined()
+      expect(protocol._config.referral).toBeUndefined()
     })
   })
 
@@ -277,13 +284,16 @@ describe('OneClickPay', () => {
         recipientChain: 'eth'
       })
 
-      expect(protocol.swap).toHaveBeenCalledWith({
-        tokenIn: 'native',
-        tokenOut: '0xdac17f958d2ee523a2206206994597c13d831ec7',
-        tokenOutAmount: 50000000n,
-        destinationChain: 'eth',
-        to: '0xAlice'
-      })
+      expect(protocol.swap).toHaveBeenCalledWith(
+        {
+          tokenIn: 'native',
+          tokenOut: '0xdac17f958d2ee523a2206206994597c13d831ec7',
+          tokenOutAmount: 50000000n,
+          destinationChain: 'eth',
+          to: '0xAlice'
+        },
+        expect.objectContaining({ slippageBps: 200 })
+      )
 
       expect(result.hash).toBe('0xdeposithash')
       expect(result.depositAddress).toBe('0xdepositaddr')
@@ -295,7 +305,7 @@ describe('OneClickPay', () => {
       expect(result.quoteResponse).toBeDefined()
     })
 
-    it('applies per-call slippage override', async () => {
+    it('applies per-call slippage override via overrides object', async () => {
       const protocol = createMockProtocol()
       const pay = new OneClickPay(protocol)
 
@@ -307,8 +317,12 @@ describe('OneClickPay', () => {
         slippageBps: 300
       })
 
-      // Config should be restored after
+      // Config must never be mutated
       expect(protocol._config.slippageBps).toBe(100)
+
+      // The overrides passed to swap should contain slippageBps: 300
+      const overrides = protocol.swap.mock.calls[0][1]
+      expect(overrides.slippageBps).toBe(300)
     })
   })
 
@@ -566,14 +580,9 @@ describe('OneClickPay', () => {
   })
 
   describe('config forwarding verification', () => {
-    it('applies deadline, quoteWaitingTimeMs, appFees, referral during the call', async () => {
+    it('passes all OneClickPay config fields as overrides without mutating protocol._config', async () => {
       const protocol = createMockProtocol()
-      let capturedConfig = null
-      protocol.quoteSwap.mockImplementation(async () => {
-        // Capture the config state during the call
-        capturedConfig = { ...protocol._config }
-        return { fee: 0n, tokenInAmount: 71500n, tokenOutAmount: 50000000n }
-      })
+      const originalConfig = { ...protocol._config }
 
       const pay = new OneClickPay(protocol, {
         deadlineMs: 3600000,
@@ -589,19 +598,56 @@ describe('OneClickPay', () => {
         recipientChain: 'eth'
       })
 
-      // Config was applied during the call
-      expect(capturedConfig.slippageBps).toBe(200) // OneClickPay default
-      expect(capturedConfig.deadlineMs).toBe(3600000)
-      expect(capturedConfig.quoteWaitingTimeMs).toBe(5000)
-      expect(capturedConfig.appFees).toEqual([{ recipient: '0xfee', fee: 50 }])
-      expect(capturedConfig.referral).toBe('myapp')
+      // Overrides are passed as second argument to quoteSwap
+      const overrides = protocol.quoteSwap.mock.calls[0][1]
+      expect(overrides.slippageBps).toBe(200) // OneClickPay default
+      expect(overrides.deadlineMs).toBe(3600000)
+      expect(overrides.quoteWaitingTimeMs).toBe(5000)
+      expect(overrides.appFees).toEqual([{ recipient: '0xfee', fee: 50 }])
+      expect(overrides.referral).toBe('myapp')
 
-      // Config is restored after the call
-      expect(protocol._config.slippageBps).toBe(100) // original
-      expect(protocol._config.deadlineMs).toBe(600000) // original
-      expect(protocol._config.quoteWaitingTimeMs).toBeUndefined() // original
-      expect(protocol._config.appFees).toBeUndefined() // original
-      expect(protocol._config.referral).toBeUndefined() // original
+      // protocol._config is completely unchanged before, during, and after
+      expect(protocol._config).toEqual(originalConfig)
+    })
+
+    it('protocol._config is unchanged after quotePay', async () => {
+      const protocol = createMockProtocol()
+      const configBefore = JSON.parse(JSON.stringify(protocol._config))
+
+      const pay = new OneClickPay(protocol, {
+        deadlineMs: 9999999,
+        quoteWaitingTimeMs: 1000,
+        slippageBps: 500
+      })
+
+      await pay.quotePay({
+        tokenIn: 'native',
+        amount: 50,
+        recipientAddress: '0xAlice',
+        recipientChain: 'eth'
+      })
+
+      expect(protocol._config).toEqual(configBefore)
+    })
+
+    it('protocol._config is unchanged after pay', async () => {
+      const protocol = createMockProtocol()
+      const configBefore = JSON.parse(JSON.stringify(protocol._config))
+
+      const pay = new OneClickPay(protocol, {
+        deadlineMs: 9999999,
+        quoteWaitingTimeMs: 1000,
+        slippageBps: 500
+      })
+
+      await pay.pay({
+        tokenIn: 'native',
+        amount: 50,
+        recipientAddress: '0xAlice',
+        recipientChain: 'eth'
+      })
+
+      expect(protocol._config).toEqual(configBefore)
     })
   })
 })

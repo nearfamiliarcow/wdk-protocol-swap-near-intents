@@ -140,21 +140,21 @@ export default class OneClickPay {
 
     let quote
     try {
-      quote = await this._callWithSlippage(slippageBps, () =>
+      quote = await this._callWithSlippage(slippageBps, (overrides) =>
         this._protocol.quoteSwap({
           tokenIn: options.tokenIn,
           tokenOut: usdt.contractAddress ?? 'native',
           tokenOutAmount: baseAmount,
           destinationChain: options.recipientChain,
           to: options.recipientAddress
-        })
+        }, overrides)
       )
     } catch (err) {
       throw this._enrichError(err)
     }
 
-    const sourceEntry = await this._protocol._registry.resolve(
-      this._protocol._config.sourceChain,
+    const sourceEntry = await this._protocol.resolveToken(
+      this._protocol.sourceChain,
       options.tokenIn
     )
 
@@ -196,14 +196,14 @@ export default class OneClickPay {
 
     let result
     try {
-      result = await this._callWithSlippage(slippageBps, () =>
+      result = await this._callWithSlippage(slippageBps, (overrides) =>
         this._protocol.swap({
           tokenIn: options.tokenIn,
           tokenOut: usdt.contractAddress ?? 'native',
           tokenOutAmount: baseAmount,
           destinationChain: options.recipientChain,
           to: options.recipientAddress
-        })
+        }, overrides)
       )
     } catch (err) {
       throw this._enrichError(err)
@@ -334,43 +334,29 @@ export default class OneClickPay {
   }
 
   /**
-   * Execute a function with temporary config overrides on the protocol.
-   * NOT safe for concurrent calls on the same instance — await creates interleaving
-   * that can cause one call to read another's config values. In practice, payment UIs
-   * do not issue concurrent pay() calls on the same instance (user clicks Pay, waits,
-   * then clicks again). If concurrent use is needed, use separate OneClickPay instances.
+   * Build an overrides object and call fn with it, forwarding OneClickPay config
+   * values and the per-call slippageBps to the protocol without mutating its config.
    * @private
    * @param {number} slippageBps
-   * @param {Function} fn
+   * @param {Function} fn - Receives the overrides object and must forward it to the protocol call.
    * @returns {Promise<any>}
    */
   async _callWithSlippage (slippageBps, fn) {
-    const original = this._protocol._config.slippageBps
-    const originalDeadline = this._protocol._config.deadlineMs
-    const originalQuoteWaiting = this._protocol._config.quoteWaitingTimeMs
-    const originalAppFees = this._protocol._config.appFees
-    const originalReferral = this._protocol._config.referral
+    const overrides = {
+      slippageBps,
+      deadlineMs: this._config.deadlineMs ?? DEFAULT_DEADLINE_MS,
+      quoteWaitingTimeMs: this._config.quoteWaitingTimeMs ?? DEFAULT_QUOTE_WAITING_TIME_MS
+    }
 
-    // Apply OneClickPay config overrides for this call
-    this._protocol._config.slippageBps = slippageBps
-    this._protocol._config.deadlineMs = this._config.deadlineMs ?? DEFAULT_DEADLINE_MS
-    this._protocol._config.quoteWaitingTimeMs = this._config.quoteWaitingTimeMs ?? DEFAULT_QUOTE_WAITING_TIME_MS
     if (this._config.appFees) {
-      this._protocol._config.appFees = this._config.appFees
-    }
-    if (this._config.referral) {
-      this._protocol._config.referral = this._config.referral
+      overrides.appFees = this._config.appFees
     }
 
-    try {
-      return await fn()
-    } finally {
-      this._protocol._config.slippageBps = original
-      this._protocol._config.deadlineMs = originalDeadline
-      this._protocol._config.quoteWaitingTimeMs = originalQuoteWaiting
-      this._protocol._config.appFees = originalAppFees
-      this._protocol._config.referral = originalReferral
+    if (this._config.referral) {
+      overrides.referral = this._config.referral
     }
+
+    return fn(overrides)
   }
 }
 
