@@ -2,7 +2,7 @@
 
 **Note**: This package is currently in beta. Please test thoroughly in development environments before using in production.
 
-A chain-agnostic WDK swap protocol that wraps the [NEAR Intents 1Click API](https://docs.defuse.org/) for cross-chain token swaps across 29+ blockchains. Works with any WDK wallet implementation — EVM, Solana, BTC, TON, Tron — with no chain-specific logic.
+A chain-agnostic WDK swap protocol that wraps the [NEAR Intents 1Click API](https://docs.near-intents.org/) for cross-chain token swaps across 29+ blockchains. Works with any WDK wallet implementation — EVM, Solana, BTC, TON, Tron — with no chain-specific logic.
 
 This package also includes **OneClickPay**, a payment helper that enables "pay anyone in USDT from any asset you hold" with exact-output guarantees and automatic refunds.
 
@@ -41,7 +41,7 @@ npm install @tetherto/wdk-protocol-swap-near-intents
 import OneClickProtocol from '@tetherto/wdk-protocol-swap-near-intents'
 import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
 
-// Create wallet account
+// Create wallet account (EVM wallets use `new` — synchronous constructor)
 const account = new WalletAccountEvm(seedPhrase, "0'/0/0", {
   provider: 'https://mainnet.base.org'
 })
@@ -108,7 +108,7 @@ import OneClickProtocol from '@tetherto/wdk-protocol-swap-near-intents'
 import { OneClickPay } from '@tetherto/wdk-protocol-swap-near-intents'
 import { WalletAccountSolana } from '@tetherto/wdk-wallet-solana'
 
-// Create Solana wallet
+// Create Solana wallet (Solana wallets use async `at()` factory — not `new`)
 const account = await WalletAccountSolana.at(seedPhrase, "0'/0/0", {
   rpcUrl: 'https://api.mainnet-beta.solana.com'
 })
@@ -207,8 +207,8 @@ new OneClickProtocol(account, config)
 | `config.jwt` | `string` | Bearer JWT for authenticated endpoints. Required for `swap()`. Unauthenticated quotes incur +0.2% fee. |
 | `config.slippageBps` | `number` | Slippage tolerance in basis points. Default: `100` (1%). |
 | `config.deadlineMs` | `number` | Quote validity in milliseconds. Default: `600000` (10 min). |
-| `config.swapMaxFee` | `number \| bigint` | Maximum deposit transaction fee. Swap is rejected if gas exceeds this. |
-| `config.depositTxOptions` | `Object` | Extra params for `sendTransaction()` (e.g., BTC `feeRate`). |
+| `config.swapMaxFee` | `number \| bigint` | Maximum deposit transaction fee. Swap is rejected if gas meets or exceeds this. |
+| `config.depositTxOptions` | `Object` | Extra params spread into deposit transactions for both native (`sendTransaction`) and token (`transfer`) paths (e.g., BTC `feeRate`). |
 | `config.quoteWaitingTimeMs` | `number` | How long the relay waits for market maker quotes. `3000` can yield better rates on illiquid pairs. |
 | `config.appFees` | `Array<{recipient, fee}>` | Application fees in basis points. |
 | `config.referral` | `string` | Referral identifier for partner tracking. |
@@ -251,13 +251,14 @@ Takes the same options as `quoteSwap()`. Requires `jwt` in config.
 | `tokenInAmount` | `bigint` | Amount deposited |
 | `tokenOutAmount` | `bigint` | Expected output amount |
 | `depositAddress` | `string` | Address tokens were deposited to (use for status polling) |
+| `depositMemo` | `string \| undefined` | Deposit memo for memo-based chains (Stellar forward-compat) |
 | `correlationId` | `string` | Unique ID for support requests |
 | `quoteSignature` | `string` | Cryptographic commitment to quoted terms |
 | `quoteResponse` | `Object` | Full 1Click API response for debugging/dispute resolution |
 
-#### `getSwapStatus(depositAddress)` → `Promise<OneClickSwapStatusResult>`
+#### `getSwapStatus(depositAddress, depositMemo?)` → `Promise<OneClickSwapStatusResult>`
 
-Poll the execution status of a swap.
+Poll the execution status of a swap. The optional `depositMemo` parameter is for forward-compatibility with memo-based chains (e.g., Stellar).
 
 **Returns:**
 
@@ -277,11 +278,20 @@ Poll the execution status of a swap.
 
 #### `getSupportedTokens()` → `Promise<Array>`
 
-Returns the full list of tokens supported by the 1Click API.
+Returns the full list of tokens supported by the 1Click API. Each entry contains:
 
-#### `resolveToken(chain, tokenAddress)` → `Promise<AssetEntry>`
+| Field | Type | Description |
+|---|---|---|
+| `assetId` | `string` | 1Click NEP-141 asset ID |
+| `decimals` | `number` | Token decimal places |
+| `blockchain` | `string` | 1Click chain ID |
+| `symbol` | `string` | Token symbol (e.g., `"USDT"`, `"ETH"`) |
+| `price` | `string` | Current price in USD |
+| `contractAddress` | `string \| null` | Token contract address, or `null` for native assets |
 
-Resolves a WDK token address to a 1Click asset entry. Pass `'native'` for native assets.
+#### `resolveToken(chain, tokenAddress)` → `Promise<Object>`
+
+Resolves a WDK token address to a 1Click asset entry. Pass `'native'` for native assets. Returns `{ assetId, isNative, decimals, symbol }`.
 
 #### `sourceChain` (getter) → `string`
 
@@ -300,7 +310,7 @@ new OneClickPay(protocol, config)
 | Parameter | Type | Description |
 |---|---|---|
 | `protocol` | `OneClickProtocol` | An initialized protocol instance |
-| `config.acceptedSymbols` | `string \| string[]` | `'native'` (default, USDT only), `'all'` (USDT + USDT0), or explicit array |
+| `config.acceptedSymbols` | `string \| string[]` | `'native'` (default, natively issued USDT only — not native blockchain assets), `'all'` (USDT + USDT0 + future variants), or explicit array e.g. `['USDT', 'USDT0']` |
 | `config.slippageBps` | `number` | Slippage tolerance. Default: `200` (2%). |
 | `config.deadlineMs` | `number` | Quote deadline. Default: `7200000` (2 hours). |
 | `config.quoteWaitingTimeMs` | `number` | Relay wait time. Default: `3000` (3 seconds). |
@@ -315,12 +325,14 @@ new OneClickPay(protocol, config)
 | `amount` | `number \| string` | USDT amount in human units (e.g., `50` for $50) |
 | `recipientAddress` | `string` | Recipient's address on destination chain |
 | `recipientChain` | `string` | 1Click chain ID (e.g., `"eth"`, `"sol"`, `"ton"`) |
+| `tokenOut` | `string` | *(Optional)* Explicit USDT variant contract address. Bypasses auto-resolution. |
+| `slippageBps` | `number` | *(Optional)* Override slippage tolerance for this call only. |
 
 **Returns:** `{ costFormatted, costBaseUnits, costSymbol, amount, recipientChain, timeEstimate, slippageBps }`
 
 #### `pay(options)` → `Promise<PayResult>`
 
-Same options as `quotePay()`.
+Same options as `quotePay()` (including optional `tokenOut` and `slippageBps` overrides).
 
 **Returns:** `{ hash, depositAddress, amountPaid, amountReceived, recipientChain, recipientAddress, correlationId, quoteResponse }`
 
@@ -395,15 +407,15 @@ Check `refundedAmountFormatted` in the status response to surface this to users.
 
 ### JWT Authentication
 
-A JWT token is required for executing swaps and polling status. Unauthenticated quote requests work but incur a +0.2% fee penalty on the quoted rate.
+A JWT token is required for executing swaps. Unauthenticated quote and status requests work but may incur a +0.2% fee penalty on quoted rates.
 
-To obtain a JWT token, visit the [NEAR Intents documentation](https://docs.defuse.org/) or contact the NEAR Intents team to register as a distribution channel partner.
+To obtain a JWT token, visit the [NEAR Intents documentation](https://docs.near-intents.org/) or contact the NEAR Intents team to register as a distribution channel partner.
 
 | Endpoint | JWT Required | Effect |
 |---|---|---|
 | `quoteSwap()` | No | Works without JWT, but quoted rate has +0.2% penalty |
 | `swap()` | **Yes** | JWT must be valid and not expired |
-| `getSwapStatus()` | **Yes** | Requires JWT for status queries |
+| `getSwapStatus()` | No | Works without JWT; JWT recommended for better rate quotes |
 
 ### Solana Rent-Exempt Minimum
 
@@ -437,7 +449,7 @@ Edit `.env` with your credentials:
 WALLET_SEED=your twelve word mnemonic seed phrase here
 
 # 1Click API JWT token for authenticated quotes and swaps.
-# Contact the NEAR Intents team or visit https://docs.defuse.org/ to obtain one.
+# Contact the NEAR Intents team or visit https://docs.near-intents.org/ to obtain one.
 ONECLICK_JWT=your-jwt-token-here
 ```
 
@@ -450,7 +462,7 @@ node demo/server.js
 
 ### Demo Wallets
 
-The demo derives 4 wallets from a single seed phrase:
+The demo derives 3 wallet accounts from a single seed phrase (BTC, Base EVM, Solana), with the Solana account used for both native SOL and USDT SPL tokens:
 
 | Wallet | Chain | Asset | Description |
 |---|---|---|---|
@@ -493,7 +505,7 @@ Fund any wallet address shown in the UI to start testing. Base ETH and SOL are t
 
 - [WDK Documentation](https://docs.wallet.tether.io) — Full WDK ecosystem docs
 - [WDK GitHub](https://github.com/tetherto) — WDK wallet and protocol packages
-- [NEAR Intents / 1Click API](https://docs.defuse.org/) — 1Click API documentation
+- [NEAR Intents / 1Click API](https://docs.near-intents.org/) — 1Click API documentation
 - [1Click API Base URL](https://1click.chaindefuser.com) — API endpoint
 
 ## Development
