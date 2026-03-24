@@ -1,8 +1,6 @@
 # @tetherto/wdk-protocol-swap-near-intents
 
-**Note**: This package is currently in beta. Please test thoroughly in development environments before using in production.
-
-A chain-agnostic WDK swap protocol that wraps the [NEAR Intents 1Click API](https://docs.near-intents.org/) for cross-chain token swaps across 29+ blockchains. Works with any WDK wallet implementation — EVM, Solana, BTC, TON, Tron — with no chain-specific logic.
+A chain-agnostic WDK swap protocol that wraps the [NEAR Intents 1Click API](https://docs.near-intents.org/) for cross-chain token swaps across 30+ blockchains. Works with any WDK wallet implementation — EVM, Solana, BTC, TON, Tron — with no chain-specific logic.
 
 This package also includes **OneClickPay**, a payment helper that enables "pay anyone in USDT from any asset you hold" with exact-output guarantees and automatic refunds.
 
@@ -16,7 +14,7 @@ For detailed documentation about the complete WDK ecosystem, visit [docs.wallet.
 
 ## Features
 
-- **Cross-Chain Swaps**: Swap tokens across 29+ blockchains via NEAR Intents routing
+- **Cross-Chain Swaps**: Swap tokens across 30+ blockchains via NEAR Intents routing
 - **Chain-Agnostic**: Works with any WDK wallet (EVM, Solana, BTC, TON, Tron) — no chain-specific imports
 - **Deposit-Address Model**: Get a quote, deposit to an address, settlement happens automatically
 - **Cross-Pay (USDT)**: Pay anyone in USDT from any asset — recipient gets the exact dollar amount
@@ -208,7 +206,7 @@ new OneClickProtocol(account, config)
 | `config.slippageBps` | `number` | Slippage tolerance in basis points. Default: `100` (1%). |
 | `config.deadlineMs` | `number` | Quote validity in milliseconds. Default: `600000` (10 min). |
 | `config.swapMaxFee` | `number \| bigint` | Maximum deposit transaction fee. Swap is rejected if gas meets or exceeds this. |
-| `config.depositTxOptions` | `Object` | Extra params spread into deposit transactions for both native (`sendTransaction`) and token (`transfer`) paths (e.g., BTC `feeRate`). |
+| `config.depositTxOptions` | `Object` | Extra params spread into `sendTransaction()` for native asset deposits (e.g., BTC `feeRate`). |
 | `config.quoteWaitingTimeMs` | `number` | How long the relay waits for market maker quotes. `3000` can yield better rates on illiquid pairs. |
 | `config.appFees` | `Array<{recipient, fee}>` | Application fees in basis points. |
 | `config.referral` | `string` | Referral identifier for partner tracking. |
@@ -366,6 +364,7 @@ The 1Click API supports 29+ chains. Common chain IDs:
 | `ton` | TON |
 | `tron` | Tron |
 | `near` | NEAR |
+| `plasma` | Plasma (optimized for stablecoin transfers) |
 
 Use `getSupportedTokens()` for the full list.
 
@@ -392,7 +391,7 @@ Unlike atomic swap protocols where the swap executes in a single on-chain transa
 
 ### Fee Reporting
 
-- `quoteSwap().fee` — Estimated deposit gas cost (uses a placeholder address, may be slightly off for Solana SPL tokens)
+- `quoteSwap().fee` — Estimated deposit gas cost (may underestimate by ~0.002 SOL for Solana SPL token swaps, since the estimate assumes the sender's associated token account already exists)
 - `swap().fee` — Actual deposit gas cost paid on the source chain
 - The 1Click protocol fee is embedded in the exchange rate spread, not reported separately
 
@@ -415,7 +414,7 @@ To obtain a JWT token, visit the [NEAR Intents documentation](https://docs.near-
 |---|---|---|
 | `quoteSwap()` | No | Works without JWT, but quoted rate has +0.2% penalty |
 | `swap()` | **Yes** | JWT must be valid and not expired |
-| `getSwapStatus()` | No | Works without JWT; JWT recommended for better rate quotes |
+| `getSwapStatus()` | No | Works without JWT |
 
 ### Solana Rent-Exempt Minimum
 
@@ -566,7 +565,7 @@ Common errors to handle gracefully:
 
 ## Demo
 
-A full demo with a web UI for testing cross-chain swaps and cross-pay flows is available on the [`demo` branch](https://github.com/nearfamiliarcow/wdk-protocol-swap-near-intents/tree/demo). It includes:
+A full demo with a web UI for testing cross-chain swaps and cross-pay flows is available on the [`demo` branch](https://github.com/nearfamiliarcow/wdk-protocol-swap-near-intents/tree/demo) (community fork). It includes:
 
 - Multi-wallet support (BTC, Base ETH, SOL, USDT on Solana)
 - Cross-chain swap and cross-pay (USDT) tabs
