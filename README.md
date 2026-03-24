@@ -395,27 +395,106 @@ Check `refundedAmountFormatted` in the status response to surface this to users.
 
 ### JWT Authentication
 
+A JWT token is required for executing swaps and polling status. Unauthenticated quote requests work but incur a +0.2% fee penalty on the quoted rate.
+
+To obtain a JWT token, visit the [NEAR Intents documentation](https://docs.defuse.org/) or contact the NEAR Intents team to register as a distribution channel partner.
+
 | Endpoint | JWT Required | Effect |
 |---|---|---|
 | `quoteSwap()` | No | Works without JWT, but quoted rate has +0.2% penalty |
 | `swap()` | **Yes** | JWT must be valid and not expired |
 | `getSwapStatus()` | **Yes** | Requires JWT for status queries |
 
+### Solana Rent-Exempt Minimum
+
+Solana accounts must maintain a minimum balance (~0.00089 SOL) to remain rent-exempt. When swapping the full SOL balance, leave enough for the rent-exempt minimum plus the transaction fee, or the transaction simulation will fail.
+
+### Explorer URLs
+
+The 1Click API returns empty `explorerUrl` fields in status responses. If you need block explorer links, you'll need to maintain your own chain-to-URL mapping. The demo includes one for reference (`getExplorerForChain()`).
+
+### `depositMode: "SIMPLE"`
+
+The 1Click API echoes `depositMode: "SIMPLE"` in quote responses. This is an internal routing parameter set by the API — you do not need to send it. The protocol correctly uses `depositType: "ORIGIN_CHAIN"` which is the only mode relevant for WDK wallet integrations.
+
 ## Demo
 
-A demo server and web UI are included in `demo/`:
+A full demo server and web UI are included in `demo/` for testing cross-chain swaps and cross-pay flows with real funds.
+
+### Setup
 
 ```bash
-# Copy and fill in your credentials
+# Copy the example env file
 cp .env.example .env
+```
 
-# Start the demo
+Edit `.env` with your credentials:
+
+```bash
+# BIP-39 seed phrase — DEMO USE ONLY. This seed is used by the demo server
+# to derive wallet accounts for BTC, Base (EVM), and Solana. Do NOT use a
+# seed phrase that holds significant funds.
+WALLET_SEED=your twelve word mnemonic seed phrase here
+
+# 1Click API JWT token for authenticated quotes and swaps.
+# Contact the NEAR Intents team or visit https://docs.defuse.org/ to obtain one.
+ONECLICK_JWT=your-jwt-token-here
+```
+
+Start the demo:
+
+```bash
 node demo/server.js
-
 # Open http://localhost:3000
 ```
 
-The demo supports BTC, ETH (Base), SOL, and USDT (Solana) wallets with cross-chain swap and cross-pay flows, live status polling, transaction history, and an API event log.
+### Demo Wallets
+
+The demo derives 4 wallets from a single seed phrase:
+
+| Wallet | Chain | Asset | Description |
+|---|---|---|---|
+| BTC | Bitcoin | Native BTC | SegWit (bc1q) address |
+| ETH (Base) | Base L2 | Native ETH | Low gas fees for testing |
+| SOL | Solana | Native SOL | |
+| USDT (Solana) | Solana | USDT SPL token | Same address as SOL wallet |
+
+Fund any wallet address shown in the UI to start testing. Base ETH and SOL are the cheapest to test with.
+
+### Demo Features
+
+**Cross-Chain Swap tab:**
+- Select source and destination wallets
+- Get a quote showing exchange rate and estimated time
+- Execute swap and watch live status updates (Pending → Processing → Complete)
+- Origin and destination TX hashes with block explorer links
+- "Show Advanced" toggle for raw 1Click API response data
+
+**Cross-Pay (USDT) tab:**
+- Pay anyone in USDT from any asset you hold
+- Uses `EXACT_OUTPUT` — recipient gets the exact dollar amount
+- Automatic partial refund if less source asset was needed than deposited
+- Supports 17+ destination chains
+
+**Tracking & debugging:**
+- **Transaction History** — persists across swap resets; shows status, TX hashes, amounts, refunds, correlation IDs
+- **API Event Log** — captures every request/response with timestamps and syntax-highlighted JSON; click entries to expand
+- **Balance Refresh** — auto-refreshes on swap completion; manual refresh button in header
+- **Partial Refund Display** — shows refunded amount in yellow when EXACT_OUTPUT returns excess funds
+
+### Demo Quirks
+
+- The demo reads `index.html` into memory at startup. If you edit the HTML, restart the server to pick up changes.
+- BTC swaps require 1-3 block confirmations (10-60 min) before the 1Click system begins processing.
+- Sending near-full SOL balance will fail due to Solana's rent-exempt minimum (~0.00089 SOL).
+- The demo uses `https://api.mainnet-beta.solana.com` which has rate limits. For heavy testing, use a dedicated RPC.
+
+## Related Links
+
+- [WDK Documentation](https://docs.wallet.tether.io) — Full WDK ecosystem docs
+- [WDK GitHub](https://github.com/tetherto) — WDK wallet and protocol packages
+- [NEAR Intents / 1Click API](https://docs.defuse.org/) — 1Click API documentation
+- [1Click API Base URL](https://1click.chaindefuser.com) — API endpoint
 
 ## Development
 
