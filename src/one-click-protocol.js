@@ -83,7 +83,11 @@ const DEFAULT_DEADLINE_MS = 600000
  * @property {string} updatedAt - ISO 8601 timestamp.
  * @property {string|null} originTxHash - First origin chain transaction hash, or null if not yet available.
  * @property {string|null} destinationTxHash - First destination chain transaction hash, or null if not yet available.
- * @property {Object} swapDetails - Transaction hashes, amounts, refund info.
+ * @property {string|null} refundedAmount - Refunded amount in base units (string-encoded), or null/\"0\" if no refund.
+ * @property {string|null} refundedAmountFormatted - Human-readable refunded amount, or null/\"0\" if no refund.
+ * @property {string|null} refundedAmountUsd - Refunded amount in USD, or null/\"0\" if no refund.
+ * @property {string|null} refundReason - Reason for refund if provided by the API.
+ * @property {Object} swapDetails - Full raw swap details from the 1Click API.
  */
 
 const TERMINAL_STATUSES = ['SUCCESS', 'REFUNDED', 'FAILED']
@@ -299,14 +303,19 @@ export default class OneClickProtocol extends SwapProtocol {
    */
   async getSwapStatus (depositAddress, depositMemo) {
     const response = await this._client.getExecutionStatus(depositAddress, depositMemo)
+    const details = response.swapDetails ?? {}
     return {
       status: response.status,
       terminal: TERMINAL_STATUSES.includes(response.status),
       correlationId: response.correlationId,
       updatedAt: response.updatedAt,
-      originTxHash: response.swapDetails?.originChainTxHashes?.[0]?.hash ?? null,
-      destinationTxHash: response.swapDetails?.destinationChainTxHashes?.[0]?.hash ?? null,
-      swapDetails: response.swapDetails
+      originTxHash: details.originChainTxHashes?.[0]?.hash ?? null,
+      destinationTxHash: details.destinationChainTxHashes?.[0]?.hash ?? null,
+      refundedAmount: details.refundedAmount ?? null,
+      refundedAmountFormatted: details.refundedAmountFormatted ?? null,
+      refundedAmountUsd: details.refundedAmountUsd ?? null,
+      refundReason: details.refundReason ?? null,
+      swapDetails: details
     }
   }
 

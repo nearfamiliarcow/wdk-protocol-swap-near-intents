@@ -25,13 +25,13 @@
   .btn-primary { background: #4ade80; color: #000; }
   .btn-primary:hover { background: #22c55e; }
   .btn-primary:disabled { background: #1a3a1a; color: #555; cursor: not-allowed; }
-  .btn-sm { width: auto; padding: 6px 14px; font-size: 12px; margin-top: 0; border-radius: 8px; }
+  .btn-sm { width: auto; padding: 8px 16px; font-size: 12px; margin-top: 0; border-radius: 8px; }
   .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
   .tab { flex: 1; padding: 12px; text-align: center; background: #1a1a1a; border: 2px solid #222; border-radius: 12px; cursor: pointer; font-size: 15px; font-weight: 600; color: #888; transition: all 0.2s; }
   .tab:hover { border-color: #333; }
   .tab.active { border-color: #4ade80; color: #4ade80; background: #0a1a0a; }
-  .wallet-row { display: flex; gap: 8px; }
-  .wallet-btn { flex: 1; padding: 14px 12px; text-align: center; background: #1a1a1a; border: 2px solid #222; border-radius: 14px; cursor: pointer; transition: all 0.2s; }
+  .wallet-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .wallet-btn { flex: 1 1 calc(50% - 4px); min-width: calc(50% - 4px); padding: 14px 12px; text-align: center; background: #1a1a1a; border: 2px solid #222; border-radius: 14px; cursor: pointer; transition: all 0.2s; }
   .wallet-btn:hover { border-color: #333; }
   .wallet-btn.active { border-color: #4ade80; background: #0a1a0a; }
   .wallet-btn .wb-symbol { font-size: 20px; font-weight: 700; color: #fff; }
@@ -56,7 +56,7 @@
   .hidden { display: none; }
   .powered { text-align: center; color: #444; font-size: 11px; margin-top: 32px; }
   .fund-hint { background: #1a1a0a; border: 1px solid #3a3a1a; border-radius: 10px; padding: 10px 14px; font-size: 12px; color: #a0a060; margin-top: 12px; }
-  .fund-hint code { background: #222; padding: 2px 6px; border-radius: 4px; font-size: 11px; word-break: break-all; }
+  .fund-hint code { background: #222; padding: 2px 6px; border-radius: 4px; font-size: 10px; word-break: break-all; display: inline-block; max-width: 100%; }
   .swap-arrow { text-align: center; font-size: 24px; color: #4ade80; padding: 8px 0; }
 
   /* Event log styles */
@@ -498,23 +498,22 @@ function renderWallets () {
     <div class="wallet-btn active">
       <div class="wb-symbol">${w.label || w.symbol}</div>
       <div class="wb-balance">${w.balanceFormatted} ${w.symbol}</div>
-      <div class="wb-addr">${w.address.slice(0, 8)}...${w.address.slice(-6)}</div>
     </div>
   `).join('')
 
-  // Show fund hint for unique addresses with zero native balance
+  // Show all unique wallet addresses for funding
   const seen = new Set()
-  const unfunded = walletsData.filter(w => {
-    if (w.balance === '0' && !seen.has(w.address)) {
+  const unique = walletsData.filter(w => {
+    if (!seen.has(w.address)) {
       seen.add(w.address)
       return true
     }
     return false
   })
-  if (unfunded.length > 0) {
+  if (unique.length > 0) {
     document.getElementById('fund-hint').innerHTML =
-      'Fund a wallet to test real transactions:<br>' +
-      unfunded.map(w => `<b>${w.label || w.symbol}:</b> <code>${w.address}</code>`).join('<br>')
+      'Wallet addresses:<br>' +
+      unique.map(w => `<b>${w.label || w.symbol}:</b> <code>${w.address}</code>`).join('<br>')
     document.getElementById('fund-hint').classList.remove('hidden')
   }
 }
@@ -618,15 +617,17 @@ async function executeSwap () {
     setEl('swap-status-icon', '\u23F3')
     setEl('swap-status-text', 'Swap Submitted')
     setEl('swap-status-sub', 'Waiting for deposit to confirm...')
-    document.getElementById('swap-status-hash').innerHTML = 'Origin TX: <a href="' + explorerUrl + result.hash + '" target="_blank" style="color:#818cf8">' + result.hash.slice(0, 16) + '...</a>'
+    document.getElementById('swap-status-hash').innerHTML = ''
 
     // Build clean status details
     const details = document.getElementById('swap-status-details')
     details.innerHTML = '<div class="quote-box">' +
       '<div class="quote-row"><span class="quote-label">Sent</span><span class="quote-value">' + result.tokenInFormatted + '</span></div>' +
-      '<div class="quote-row"><span class="quote-label">Expected</span><span class="quote-value">' + result.tokenOutFormatted + '</span></div>' +
-      '<div class="quote-row"><span class="quote-label">Support ID</span><span class="quote-value" style="font-size:11px;font-family:monospace;color:#666">' + result.correlationId + '</span></div>' +
+      '<div class="quote-row"><span class="quote-label" id="swap-received-label">Expected</span><span class="quote-value" id="swap-received-value">' + result.tokenOutFormatted + '</span></div>' +
+      '<div class="quote-row"><span class="quote-label">Origin TX</span><span class="quote-value"><a href="' + explorerUrl + result.hash + '" target="_blank" style="color:#818cf8;font-size:12px;font-family:monospace">' + result.hash.slice(0, 12) + '...' + result.hash.slice(-8) + '</a></span></div>' +
       '<div id="swap-dest-tx-row" class="quote-row hidden"><span class="quote-label">Dest TX</span><span class="quote-value" id="swap-dest-tx-link"></span></div>' +
+      '<div id="swap-refund-row" class="quote-row hidden"><span class="quote-label">Refunded</span><span class="quote-value" id="swap-refund-value" style="color:#f0c040"></span></div>' +
+      '<div class="quote-row"><span class="quote-label">Support ID</span><span class="quote-value" style="font-size:11px;font-family:monospace;color:#666">' + result.correlationId + '</span></div>' +
       '</div>'
     details.classList.remove('hidden')
 
@@ -667,10 +668,12 @@ async function pollSwapStatus (source, depositAddress, destWalletData) {
 
       // Update live details from swapDetails
       if (s.swapDetails) {
-        // Show actual received amount once available
+        // Replace "Expected" with "Received" and show actual amount
         if (s.swapDetails.amountOutFormatted) {
-          const expectedEl = document.querySelector('#swap-status-details .quote-row:nth-child(2) .quote-value')
-          if (expectedEl) expectedEl.textContent = s.swapDetails.amountOutFormatted + ' (~$' + (s.swapDetails.amountOutUsd || '?') + ')'
+          const label = document.getElementById('swap-received-label')
+          const value = document.getElementById('swap-received-value')
+          if (label) label.textContent = 'Received'
+          if (value) value.textContent = s.swapDetails.amountOutFormatted + ' (~$' + (s.swapDetails.amountOutUsd || '?') + ')'
         }
 
         // Show destination TX hash once available
@@ -687,6 +690,16 @@ async function pollSwapStatus (source, depositAddress, destWalletData) {
         }
 
         // Render advanced details behind toggle
+        // Show partial refund if applicable
+        if (s.refundedAmountFormatted && s.refundedAmountFormatted !== '0' && s.refundedAmountFormatted !== null) {
+          const refundRow = document.getElementById('swap-refund-row')
+          const refundValue = document.getElementById('swap-refund-value')
+          if (refundRow && refundValue) {
+            refundValue.textContent = s.refundedAmountFormatted + ' (~$' + (s.refundedAmountUsd || '?') + ')'
+            refundRow.classList.remove('hidden')
+          }
+        }
+
         renderSwapDetailsInCard('swap-status-details', s.swapDetails, destWalletData)
       }
 
@@ -840,14 +853,16 @@ async function executePay () {
     document.getElementById('pay-status-card').classList.remove('hidden')
     setEl('pay-status-icon', '\u23F3'); setEl('pay-status-text', 'Payment Submitted')
     setEl('pay-status-sub', 'Waiting for confirmation...')
-    document.getElementById('pay-status-hash').innerHTML = 'Origin TX: <a href="' + explorerUrl + result.hash + '" target="_blank" style="color:#818cf8">' + result.hash.slice(0, 16) + '...</a>'
+    document.getElementById('pay-status-hash').innerHTML = ''
     const details = document.getElementById('pay-status-details')
     details.innerHTML = '<div class="quote-box">' +
       '<div class="quote-row"><span class="quote-label">Paid</span><span class="quote-value">' + result.amountPaidFormatted + '</span></div>' +
       '<div class="quote-row"><span class="quote-label">Recipient gets</span><span class="quote-value highlight">' + result.amountReceived + ' USDT</span></div>' +
       '<div class="quote-row"><span class="quote-label">Destination</span><span class="quote-value"><span class="chain-badge">' + result.recipientChain.toUpperCase() + '</span></span></div>' +
-      '<div class="quote-row"><span class="quote-label">Support ID</span><span class="quote-value" style="font-size:11px;font-family:monospace;color:#666">' + result.correlationId + '</span></div>' +
+      '<div class="quote-row"><span class="quote-label">Origin TX</span><span class="quote-value"><a href="' + explorerUrl + result.hash + '" target="_blank" style="color:#818cf8;font-size:12px;font-family:monospace">' + result.hash.slice(0, 12) + '...' + result.hash.slice(-8) + '</a></span></div>' +
       '<div id="pay-dest-tx-row" class="quote-row hidden"><span class="quote-label">Dest TX</span><span class="quote-value" id="pay-dest-tx-link"></span></div>' +
+      '<div id="pay-refund-row" class="quote-row hidden"><span class="quote-label">Refunded</span><span class="quote-value" id="pay-refund-value" style="color:#f0c040"></span></div>' +
+      '<div class="quote-row"><span class="quote-label">Support ID</span><span class="quote-value" style="font-size:11px;font-family:monospace;color:#666">' + result.correlationId + '</span></div>' +
       '</div>'
     details.classList.remove('hidden')
 
@@ -897,6 +912,16 @@ async function pollPayStatus (source, depositAddress, destChain) {
           if (row && link) {
             link.innerHTML = '<a href="' + destExplorer + destHash + '" target="_blank" style="color:#818cf8;font-size:12px;font-family:monospace">' + destHash.slice(0, 12) + '...' + destHash.slice(-8) + '</a>'
             row.classList.remove('hidden')
+          }
+        }
+
+        // Show partial refund if applicable
+        if (s.refundedAmountFormatted && s.refundedAmountFormatted !== '0' && s.refundedAmountFormatted !== null) {
+          const refundRow = document.getElementById('pay-refund-row')
+          const refundValue = document.getElementById('pay-refund-value')
+          if (refundRow && refundValue) {
+            refundValue.textContent = s.refundedAmountFormatted + ' (~$' + (s.refundedAmountUsd || '?') + ')'
+            refundRow.classList.remove('hidden')
           }
         }
 
