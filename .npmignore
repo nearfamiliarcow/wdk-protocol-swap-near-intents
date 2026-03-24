@@ -4,3 +4,8 @@ tests
 tsconfig.json
 .github
 demo
+.env
+.env.example
+.editorconfig
+.claude
+CONTRIBUTING.md
